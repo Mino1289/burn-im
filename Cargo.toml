@@ -1,0 +1,12 @@
+[package]
+name = "burn-im"
+version = "0.1.0"
+edition = "2024"
+description = "Pretrained computer vision backbones, architectures, and feature extractors in pure Rust, powered by Burn."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Mino1289/burn-im"
+readme = "README.md"
+keywords = ["burn", "computer-vision", "deep-learning", "timm", "vision"]
+categories = ["science", "computer-vision"]
+
+[dependencies]
