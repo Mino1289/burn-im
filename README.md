@@ -10,7 +10,7 @@ It provides idiomatic implementations of modern vision backbones, native loading
 
 - No Python at runtime, no `pyo3`, no `libtorch`.
 - WebAssembly-compatible model code (plain `burn::nn` layers).
-- Numerically verified against `timm` at `1e-4` (see [Numerical parity](#numerical-parity)).
+- Numerically verified against `timm` at `1e-5` relative L2 (see [Numerical parity](#numerical-parity)).
 
 ## Supported models
 
@@ -153,24 +153,62 @@ against reference `timm`/`torchvision` outputs on deterministic inputs:
 | `alexnet` (torchvision)   | `5.5e-5`                    |
 | `resnet18` `in_chans=1`   | `1.2e-5`                    |
 
-Tolerance: `1e-4`.
+Tolerance: **`1e-5` relative L2** for every compared tensor, plus an elementwise
+`1e-4` ceiling so a single outlier cannot hide behind the norm. The elementwise value is
+the f32 accumulation noise floor of these networks, not algorithmic slack — the per-element
+differences are the ones listed above.
 
 ```bash
 # Unit + registry + intermediates tests (no network).
 cargo test
-
-# Hub weight-loading and golden-parity tests (network on first run).
-cargo test -- --ignored --nocapture
-
-# GPU smoke test / CPU-GPU parity / throughput.
-cargo test --features gpu --test gpu -- --nocapture
 ```
 
-Golden fixtures are generated with:
+Golden fixtures are generated with `scripts/generate_fixtures.py`; see
+[Development](#development) for the Python setup and the full test matrix.
+
+## Development
+
+Using the crate does **not** require Python. Python is only needed to regenerate the
+reference outputs stored under `tests/fixtures/golden/`.
+
+The generator runs the official `timm` (and `torchvision` for AlexNet) checkpoints, so use
+whichever PyTorch build matches your machine — CPU, CUDA, ROCm or Intel XPU.
+[`uv`](https://docs.astral.sh/uv/) keeps that environment isolated and disposable:
 
 ```bash
-~/Programming/ai/bin/python scripts/generate_fixtures.py
+# 1. Install uv (once).
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2. Create an isolated Python environment.
+uv venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+
+# 3. Install the PyTorch build you want (pick one line):
+uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+# uv pip install torch torchvision --index-url https://download.pytorch.org/whl/rocm6.2
+# uv pip install torch torchvision --index-url https://download.pytorch.org/whl/xpu
+
+# 4. Install timm on top of the PyTorch you just chose.
+uv pip install timm
+
+# 5. Regenerate the golden fixtures.
+uv run python scripts/generate_fixtures.py
 ```
+
+Then run the suites and lints:
+
+```bash
+cargo test                                            # no network
+cargo test -- --ignored --nocapture                   # Hub weights + timm parity
+cargo test --features gpu --test gpu -- --nocapture   # Vulkan smoke/parity/throughput
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+```
+
+The golden tests download the same `timm/<arch>.<tag>` checkpoints as the library, then
+compare logits, features, `pre_logits` and every intermediate level. Fixtures are
+committed; weights are not.
 
 ## Roadmap
 

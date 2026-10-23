@@ -1,7 +1,7 @@
 """Generate golden fixtures from timm for burn-im parity tests.
 
 Usage:
-    ~/Programming/ai/bin/python scripts/generate_fixtures.py
+    uv run python scripts/generate_fixtures.py
 
 Writes one `.safetensors` file per architecture under `tests/fixtures/golden/`
 containing the deterministic input, timm's logits, final features and every
