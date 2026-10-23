@@ -207,6 +207,9 @@ The golden tests download the same `timm/<arch>.<tag>` checkpoints as the librar
 compare logits, features, `pre_logits` and every intermediate level. Fixtures are
 committed; weights are not.
 
+Adding a model? See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the implementation, fixture
+and parity-test workflow.
+
 ## Roadmap
 
 - [x] ResNet / ResNet-D / ResNeXt families with timm weight loading
