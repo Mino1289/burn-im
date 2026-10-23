@@ -171,8 +171,7 @@ Golden fixtures are generated with `scripts/generate_fixtures.py`; see
 Using the crate does **not** require Python. Python is only needed to regenerate the
 reference outputs stored under `tests/fixtures/golden/`.
 
-The generator runs the official `timm` (and `torchvision` for AlexNet) checkpoints, so use
-whichever PyTorch build matches your machine — CPU, CUDA, ROCm or Intel XPU.
+The generator runs the official `timm` (and `torchvision` for AlexNet) checkpoints.
 [`uv`](https://docs.astral.sh/uv/) keeps that environment isolated and disposable:
 
 ```bash
@@ -183,13 +182,11 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 uv venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 
-# 3. Install the PyTorch build you want (pick one line):
-uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-# uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
-# uv pip install torch torchvision --index-url https://download.pytorch.org/whl/rocm6.2
-# uv pip install torch torchvision --index-url https://download.pytorch.org/whl/xpu
+# 3. Install PyTorch for your platform:
+#    https://pytorch.org/get-started/locally/
+uv pip install torch torchvision
 
-# 4. Install timm on top of the PyTorch you just chose.
+# 4. Install timm on top of it.
 uv pip install timm
 
 # 5. Regenerate the golden fixtures.
