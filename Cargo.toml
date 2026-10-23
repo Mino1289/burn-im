@@ -10,4 +10,22 @@ readme = "README.md"
 keywords = ["burn", "burn-framework", "timm", "computer-vision", "deep-learning"]
 categories = ["science", "computer-vision"]
 
+[features]
+default = []
+image = ["dep:image"]
+# Enables Burn's Vulkan/wgpu backend (Intel, AMD, NVIDIA) for GPU execution.
+gpu = ["burn/vulkan"]
+
 [dependencies]
+burn = { version = "0.22.1", default-features = false, features = ["std"] }
+burn-store = { version = "0.22.1", default-features = false, features = ["std", "safetensors"] }
+hf-hub = { version = "0.4.3", default-features = false, features = ["ureq", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+regex = "1.11"
+safetensors = "0.8"
+image = { version = "0.25", optional = true, default-features = false, features = ["png", "jpeg"] }
+
+[dev-dependencies]
+burn = { version = "0.22.1", default-features = false, features = ["std", "flex"] }
