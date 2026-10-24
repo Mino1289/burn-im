@@ -29,3 +29,8 @@ image = { version = "0.25", optional = true, default-features = false, features 
 
 [dev-dependencies]
 burn = { version = "0.22.1", default-features = false, features = ["std", "flex"] }
+
+[[example]]
+name = "classify"
+path = "examples/classify.rs"
+required-features = ["image"]

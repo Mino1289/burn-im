@@ -64,6 +64,7 @@
 
 #![warn(missing_docs)]
 
+pub mod data;
 pub mod error;
 pub mod hub;
 pub mod layers;
@@ -71,6 +72,7 @@ pub mod models;
 pub mod registry;
 pub mod traits;
 
+pub use data::{ImageGeometry, ImageProcessor, imagenet_label};
 pub use error::{Error, Result};
 pub use hub::config::{Interpolation, PretrainedCfg, TimmHfConfig};
 pub use registry::{

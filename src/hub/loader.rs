@@ -26,7 +26,7 @@ pub struct LoadReport {
 }
 
 impl LoadReport {
-    /// Whether every module parameter except the classifier head was loaded.
+    /// Whether every module parameter was found and no tensor failed to load.
     pub fn is_complete(&self) -> bool {
         self.missing.is_empty() && self.errors.is_empty()
     }

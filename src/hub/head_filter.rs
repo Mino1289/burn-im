@@ -38,7 +38,8 @@ pub fn target_num_classes(pretrained_classes: usize, requested: Option<usize>) -
 
 /// Adapts a pretrained first convolution to a different number of input channels.
 ///
-/// Mirrors `timm`'s `adapt_input_conv`:
+/// The source kernel is expected to be RGB, which is the case for every `timm` checkpoint in the
+/// registry. Mirrors `timm`'s `adapt_input_conv` for that case:
 /// * `1` channel sums the RGB kernels,
 /// * any other count repeats the RGB kernel and rescales by `3 / in_chans`.
 pub fn adapt_input_conv(weight: Tensor<4>, in_chans: usize) -> Tensor<4> {
@@ -49,8 +50,40 @@ pub fn adapt_input_conv(weight: Tensor<4>, in_chans: usize) -> Tensor<4> {
     if in_chans == 1 {
         return weight.sum_dim(1);
     }
-    let repeat = src.div_ceil(3);
+    let repeat = in_chans.div_ceil(src);
     Tensor::cat(vec![weight; repeat], 1)
         .narrow(1, 0, in_chans)
         .mul_scalar(3.0 / in_chans as f64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn adapt_input_conv_repeats_rgb_kernel_for_extra_channels() {
+        let weight = Tensor::<4>::ones([2, 3, 1, 1], &Device::flex());
+
+        let repeated = adapt_input_conv(weight.clone(), 6);
+        assert_eq!(repeated.dims(), [2, 6, 1, 1]);
+        assert!(
+            repeated
+                .into_data()
+                .as_slice::<f32>()
+                .unwrap()
+                .iter()
+                .all(|v| *v == 0.5)
+        );
+
+        let summed = adapt_input_conv(weight, 1);
+        assert_eq!(summed.dims(), [2, 1, 1, 1]);
+        assert!(
+            summed
+                .into_data()
+                .as_slice::<f32>()
+                .unwrap()
+                .iter()
+                .all(|v| *v == 3.0)
+        );
+    }
 }

@@ -39,7 +39,7 @@ burn = { version = "0.22", features = ["flex"] } # pick your backend
 
 | Feature | Default | Effect                                                        |
 | ------- | ------- | ------------------------------------------------------------- |
-| `image` | no      | `image`-crate integration for decoding JPEG/PNG inputs.        |
+| `image` | no      | Image decoding and preprocessing (`ImageProcessor`).           |
 | `gpu`   | no      | Enables Burn's `wgpu`/Vulkan backend (`burn/vulkan`).          |
 
 ## Quick start
@@ -109,6 +109,15 @@ let features = model.forward_intermediates(
 
 `model.feature_info()` returns the list of available levels, and
 `model.forward_features(x)` gives the final backbone output before pooling.
+
+### Classify an image
+
+With the `image` feature, the bundled example preprocesses a JPEG/PNG with the checkpoint's own
+`PretrainedCfg` and prints the top-k ImageNet labels (weights download on first run):
+
+```bash
+cargo run --release --example classify --features image -- path/to/image.jpg --model resnet50.a1_in1k --top 5
+```
 
 ## GPU
 
