@@ -11,11 +11,18 @@ use burn::nn::pool::{AvgPool2d, AvgPool2dConfig, MaxPool2d, MaxPool2dConfig};
 use burn::prelude::*;
 use burn::tensor::activation::relu;
 
+use crate::error::{Error, Result};
 use crate::layers::conv_norm_act::{Activation, ConvNormAct, ConvNormActConfig};
 use crate::layers::head::ClassifierHead;
 use crate::layers::pool::PoolMode;
 use crate::models::ModelMeta;
 use crate::traits::{FeatureFormat, FeatureInfo, IntermediatesOptions, VisionModel};
+
+/// Number of feature levels exposed by the family: the stem activation plus four stages.
+const NUM_LEVELS: usize = 5;
+
+/// Index of the deepest stage, used as the default `features_only` level.
+const LAST_LEVEL: usize = NUM_LEVELS - 1;
 
 /// Residual block type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +52,29 @@ pub enum StemKind {
     Deep,
 }
 
+/// Strides and dilations of one residual stage.
+///
+/// See [`ResNetConfig::stage_plan`] for how `timm` derives them from the output stride.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct StagePlan {
+    /// Stride of the stage's first block.
+    stride: usize,
+    /// Dilation of the stage's 3x3 convolutions, from the second block on.
+    dilation: usize,
+    /// Dilation in effect when the stage starts, used by its first block.
+    entry_dilation: usize,
+}
+
+impl Default for StagePlan {
+    fn default() -> Self {
+        Self {
+            stride: 1,
+            dilation: 1,
+            entry_dilation: 1,
+        }
+    }
+}
+
 /// Configuration of a ResNet variant.
 #[derive(Debug, Clone)]
 pub struct ResNetConfig {
@@ -68,6 +98,15 @@ pub struct ResNetConfig {
     pub in_chans: usize,
     /// Dropout probability before the classifier.
     pub drop_rate: f64,
+    /// Build a headless extractor stopping after the last requested level.
+    pub features_only: bool,
+    /// Feature levels to keep in `features_only` mode.
+    pub out_indices: Option<Vec<usize>>,
+    /// Spatial reduction of the deepest stage: `32` (default), `16` or `8`.
+    ///
+    /// Values below `32` replace the stride of the last stages with dilated convolutions, the
+    /// torchvision/"DeepLab" convention also followed by `timm`.
+    pub output_stride: usize,
 }
 
 impl ResNetConfig {
@@ -84,6 +123,9 @@ impl ResNetConfig {
             num_classes: 1000,
             in_chans: 3,
             drop_rate: 0.0,
+            features_only: false,
+            out_indices: None,
+            output_stride: 32,
         }
     }
 
@@ -122,6 +164,110 @@ impl ResNetConfig {
     pub fn with_drop_rate(mut self, drop_rate: f64) -> Self {
         self.drop_rate = drop_rate;
         self
+    }
+
+    /// Builds a headless feature extractor keeping the levels in `out_indices`.
+    ///
+    /// Stages deeper than the last requested level are not instantiated at all, so the memory and
+    /// loading time match the extractor actually used. The classifier is removed, hence
+    /// `num_classes == 0`. Indices follow the family's feature list: `0` is the stem activation and
+    /// `1..=4` are the four stages.
+    pub fn with_features_only(mut self, out_indices: impl IntoIterator<Item = usize>) -> Self {
+        self.features_only = true;
+        self.out_indices = Some(out_indices.into_iter().collect());
+        self.num_classes = 0;
+        self
+    }
+
+    /// Sets the spatial reduction of the deepest stage (`32`, `16` or `8`).
+    pub fn with_output_stride(mut self, output_stride: usize) -> Self {
+        self.output_stride = output_stride;
+        self
+    }
+
+    /// Checks the configuration before instantiation.
+    ///
+    /// Returns [`Error::InvalidConfiguration`] for an unsupported `output_stride`, an empty or
+    /// out-of-range `out_indices`, `out_indices` without `features_only`, and a classifier kept
+    /// alongside `features_only`.
+    pub fn validate(&self) -> Result<()> {
+        if !matches!(self.output_stride, 8 | 16 | 32) {
+            return Err(Error::InvalidConfiguration(format!(
+                "unsupported output_stride {} (expected 8, 16 or 32)",
+                self.output_stride
+            )));
+        }
+        if let Some(indices) = &self.out_indices {
+            if !self.features_only {
+                return Err(Error::InvalidConfiguration(
+                    "`out_indices` requires `features_only`".to_string(),
+                ));
+            }
+            if indices.is_empty() {
+                return Err(Error::InvalidConfiguration(
+                    "`out_indices` must not be empty".to_string(),
+                ));
+            }
+            if let Some(&idx) = indices.iter().find(|idx| **idx >= NUM_LEVELS) {
+                return Err(Error::InvalidConfiguration(format!(
+                    "feature index {idx} out of range (the family exposes {NUM_LEVELS} levels: 0..={LAST_LEVEL})"
+                )));
+            }
+        }
+        if self.features_only && self.num_classes != 0 {
+            return Err(Error::InvalidConfiguration(
+                "`features_only` removes the classifier (`num_classes` must be 0)".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Feature levels built and exposed by the model, sorted and de-duplicated.
+    pub fn effective_out_indices(&self) -> Vec<usize> {
+        let mut indices = match (self.features_only, &self.out_indices) {
+            (true, Some(indices)) => indices.clone(),
+            (true, None) => vec![LAST_LEVEL],
+            (false, _) => (0..NUM_LEVELS).collect(),
+        };
+        indices.sort_unstable();
+        indices.dedup();
+        indices
+    }
+
+    /// Per-stage plan implementing [`Self::output_stride`].
+    ///
+    /// Reproduces `timm`'s `_make_layer`: once the nominal reduction reaches
+    /// [`Self::output_stride`], the stride of the following stages is folded into the dilation of
+    /// their 3x3 convolution instead of sampling the feature map more coarsely.
+    ///
+    /// The plan carries two dilations because `timm` passes `first_dilation=prev_dilation` to each
+    /// block, where `prev_dilation` is the dilation of the *previous* block: the first block of a
+    /// dilated stage therefore convolves with the dilation of the stage before it, and only the
+    /// following blocks use [`StagePlan::dilation`].
+    fn stage_plan(&self) -> [StagePlan; 4] {
+        let mut plans = [StagePlan::default(); 4];
+        // The stem (conv stride 2 + max-pool stride 2) already reduces by 4.
+        let mut net_stride = 4;
+        let mut dilation = 1;
+        let mut previous_dilation = 1;
+
+        for (stage, plan) in plans.iter_mut().enumerate() {
+            let mut stride = if stage == 0 { 1 } else { 2 };
+            if net_stride >= self.output_stride {
+                dilation *= stride;
+                stride = 1;
+            } else {
+                net_stride *= stride;
+            }
+            *plan = StagePlan {
+                stride,
+                dilation,
+                entry_dilation: previous_dilation,
+            };
+            previous_dilation = dilation;
+        }
+
+        plans
     }
 
     /// Embedding dimension produced by the last stage.
@@ -228,7 +374,16 @@ pub struct ResNet {
 
 impl ResNet {
     /// Instantiates a ResNet from a configuration.
+    ///
+    /// # Panics
+    ///
+    /// Panics if [`ResNetConfig::validate`] fails; the registry validates first and returns
+    /// [`Error::InvalidConfiguration`] instead.
     pub fn new(config: ResNetConfig, device: &Device) -> Self {
+        config
+            .validate()
+            .expect("invalid ResNet configuration; call `validate` first");
+
         let expansion = config.block.expansion();
         let deep = config.stem == StemKind::Deep;
         let stem_chs = 64;
@@ -272,50 +427,36 @@ impl ResNet {
             }
         };
 
+        // Levels kept by `features_only`: stages deeper than the last level are never built.
+        let out_indices = config.effective_out_indices();
+        let last_level = out_indices.last().copied().unwrap_or(LAST_LEVEL);
+        let plan = config.stage_plan();
+
         let mut inplanes = stem_chs;
-        let mut layer1 = Vec::with_capacity(config.layers[0]);
-        let mut layer2 = Vec::with_capacity(config.layers[1]);
-        let mut layer3 = Vec::with_capacity(config.layers[2]);
-        let mut layer4 = Vec::with_capacity(config.layers[3]);
+        let mut stages: [Vec<ResNetBlock>; 4] = std::array::from_fn(|_| Vec::new());
+        for (stage, stage_stage) in stages.iter_mut().enumerate() {
+            let level = stage + 1;
+            if level > last_level {
+                break;
+            }
+            build_stage(
+                &config,
+                config.layers[stage],
+                config.widths[stage],
+                plan[stage],
+                &mut inplanes,
+                device,
+                stage_stage,
+            );
+        }
+        let [layer1, layer2, layer3, layer4] = stages;
 
-        build_stage(
-            &config,
-            config.layers[0],
-            config.widths[0],
-            1,
-            &mut inplanes,
-            device,
-            &mut layer1,
-        );
-        build_stage(
-            &config,
-            config.layers[1],
-            config.widths[1],
-            2,
-            &mut inplanes,
-            device,
-            &mut layer2,
-        );
-        build_stage(
-            &config,
-            config.layers[2],
-            config.widths[2],
-            2,
-            &mut inplanes,
-            device,
-            &mut layer3,
-        );
-        build_stage(
-            &config,
-            config.layers[3],
-            config.widths[3],
-            2,
-            &mut inplanes,
-            device,
-            &mut layer4,
-        );
-
-        let num_features = config.num_features();
+        // Deepest level actually built, which is what the head pools.
+        let num_features = if last_level == 0 {
+            stem_chs
+        } else {
+            config.widths[last_level - 1] * expansion
+        };
         let head = ClassifierHead::new(
             num_features,
             config.num_classes,
@@ -324,13 +465,28 @@ impl ResNet {
             device,
         );
 
-        let feature_info = vec![
-            FeatureInfo::new(0, stem_chs, 2, "act1"),
-            FeatureInfo::new(1, config.widths[0] * expansion, 4, "layer1"),
-            FeatureInfo::new(2, config.widths[1] * expansion, 8, "layer2"),
-            FeatureInfo::new(3, config.widths[2] * expansion, 16, "layer3"),
-            FeatureInfo::new(4, config.widths[3] * expansion, 32, "layer4"),
-        ];
+        // Level 0 is the stem activation (conv stride 2). The stem's 3x3 max-pool then halves the
+        // map once more before the first stage, so it also applies when a stage is not built.
+        let mut reductions = Vec::with_capacity(NUM_LEVELS);
+        let mut reduction = 2;
+        reductions.push(reduction);
+        reduction *= 2;
+        for stage in &plan {
+            reduction *= stage.stride;
+            reductions.push(reduction);
+        }
+
+        let feature_info = (0..=last_level)
+            .map(|level| match level {
+                0 => FeatureInfo::new(0, stem_chs, reductions[0], "act1"),
+                stage => FeatureInfo::new(
+                    level,
+                    config.widths[stage - 1] * expansion,
+                    reductions[level],
+                    ["layer1", "layer2", "layer3", "layer4"][stage - 1],
+                ),
+            })
+            .collect();
 
         Self {
             stem,
@@ -534,12 +690,36 @@ fn cna(
         .init(device)
 }
 
+/// Pooling of the average-pool downsample path (`ResNet-D`).
+///
+/// `timm` replaces the stride of the projection shortcut with an average pool: 2x2/2 for a
+/// strided stage, and a "same"-padded 2x2/1 pool when the stride was folded into the dilation, so
+/// the shortcut keeps the stage's resolution. That "same" pool is padded with a tensor operation
+/// and still divides by the whole kernel area, so the zeros are counted as values.
+fn ds_pool(config: &ResNetConfig, plan: StagePlan) -> Option<AvgPool2d> {
+    if !config.avg_down || (plan.stride == 1 && plan.dilation == 1) {
+        return None;
+    }
+
+    let avg = AvgPool2dConfig::new([2, 2]).with_ceil_mode(true);
+    Some(if plan.stride == 1 {
+        avg.with_strides([1, 1])
+            .with_padding(PaddingConfig2d::Same)
+            .with_count_include_pad(true)
+            .init()
+    } else {
+        avg.with_strides([2, 2])
+            .with_count_include_pad(false)
+            .init()
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn build_stage(
     config: &ResNetConfig,
     num_blocks: usize,
     planes: usize,
-    stride: usize,
+    plan: StagePlan,
     inplanes: &mut usize,
     device: &Device,
     out: &mut Vec<ResNetBlock>,
@@ -556,15 +736,14 @@ fn build_stage(
         }
     };
 
-    let needs_projection = stride != 1 || *inplanes != outplanes;
+    let needs_projection = plan.stride != 1 || *inplanes != outplanes;
     let downsample = needs_projection.then(|| Downsample {
-        avg: (config.avg_down && stride != 1)
-            .then(|| AvgPool2dConfig::new([2, 2]).with_strides([2, 2]).init()),
+        avg: ds_pool(config, plan),
         body: cna(
             *inplanes,
             outplanes,
             1,
-            if config.avg_down { 1 } else { stride },
+            if config.avg_down { 1 } else { plan.stride },
             0,
             1,
             1,
@@ -574,7 +753,13 @@ fn build_stage(
     });
 
     for block_idx in 0..num_blocks {
-        let block_stride = if block_idx == 0 { stride } else { 1 };
+        let block_stride = if block_idx == 0 { plan.stride } else { 1 };
+        // `timm` hands each block the dilation of the block before it (`first_dilation`).
+        let first_dilation = if block_idx == 0 {
+            plan.entry_dilation
+        } else {
+            plan.dilation
+        };
         let block_downsample = if block_idx == 0 {
             downsample.clone()
         } else {
@@ -587,8 +772,8 @@ fn build_stage(
                 width,
                 3,
                 block_stride,
-                1,
-                1,
+                first_dilation,
+                first_dilation,
                 1,
                 Activation::Relu,
                 device,
@@ -597,14 +782,24 @@ fn build_stage(
         };
 
         let conv2 = match config.block {
-            BlockKind::Basic => cna(width, outplanes, 3, 1, 1, 1, 1, Activation::None, device),
+            BlockKind::Basic => cna(
+                width,
+                outplanes,
+                3,
+                1,
+                plan.dilation,
+                plan.dilation,
+                1,
+                Activation::None,
+                device,
+            ),
             BlockKind::Bottleneck => cna(
                 width,
                 width,
                 3,
                 block_stride,
-                1,
-                1,
+                first_dilation,
+                first_dilation,
                 config.groups,
                 Activation::Relu,
                 device,
@@ -664,4 +859,88 @@ pub fn resnet101(num_classes: usize) -> ResNetConfig {
 pub fn resnet152(num_classes: usize) -> ResNetConfig {
     ResNetConfig::new([3, 8, 36, 3], [64, 128, 256, 512], BlockKind::Bottleneck)
         .with_num_classes(num_classes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `(stride, padding, dilation)` of a 3x3 convolution.
+    fn window(conv: &ConvNormAct) -> Option<[usize; 3]> {
+        let conv = conv.conv();
+        if conv.kernel_size != [3, 3] {
+            return None;
+        }
+        let padding = match conv.padding {
+            PaddingConfig2d::Explicit(top, _, _, _) => top,
+            _ => panic!("explicit padding expected"),
+        };
+        Some([conv.stride[0], padding, conv.dilation[0]])
+    }
+
+    /// `(stride, padding, dilation)` of the 3x3 windows of a block, `conv1` before `conv2`.
+    fn windows(block: &ResNetBlock) -> Vec<[usize; 3]> {
+        [Some(&block.conv1), Some(&block.conv2), block.conv3.as_ref()]
+            .into_iter()
+            .flatten()
+            .filter_map(window)
+            .collect()
+    }
+
+    /// Windows expected from `timm`'s block construction for one stage.
+    ///
+    /// `stride`, `entry` and `dilation` are the three values of `StagePlan`: the first block
+    /// convolves with `entry` (the dilation of the previous stage) and only the following ones use
+    /// `dilation`.
+    fn expected_windows(
+        num_blocks: usize,
+        stride: usize,
+        entry: usize,
+        dilation: usize,
+        basic: bool,
+    ) -> Vec<Vec<[usize; 3]>> {
+        (0..num_blocks)
+            .map(|block| {
+                let (block_stride, first) = if block == 0 {
+                    (stride, entry)
+                } else {
+                    (1, dilation)
+                };
+                if basic {
+                    vec![[block_stride, first, first], [1, dilation, dilation]]
+                } else {
+                    vec![[block_stride, first, first]]
+                }
+            })
+            .collect()
+    }
+
+    #[test]
+    fn output_stride_follows_timm_first_dilation() {
+        let device = Device::flex();
+
+        // `(stride, entry_dilation, dilation)` per stage, read off `timm`'s `_make_layer`.
+        let plans = [
+            (32, [(1, 1, 1), (2, 1, 1), (2, 1, 1), (2, 1, 1)]),
+            (16, [(1, 1, 1), (2, 1, 1), (2, 1, 1), (1, 1, 2)]),
+            (8, [(1, 1, 1), (2, 1, 1), (1, 1, 2), (1, 2, 4)]),
+        ];
+
+        for (output_stride, stages) in plans {
+            for (basic, config) in [(true, resnet18(0)), (false, resnet50(0))] {
+                let layers = config.layers;
+                let model = ResNet::new(config.with_output_stride(output_stride), &device);
+
+                for (idx, stage) in model.stages().iter().enumerate() {
+                    let (stride, entry, dilation) = stages[idx];
+                    let actual: Vec<Vec<[usize; 3]>> = stage.iter().map(windows).collect();
+                    assert_eq!(
+                        actual,
+                        expected_windows(layers[idx], stride, entry, dilation, basic),
+                        "stage {idx} at output stride {output_stride}"
+                    );
+                }
+            }
+        }
+    }
 }

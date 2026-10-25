@@ -28,6 +28,17 @@ pub struct CreateModelOptions {
     pub drop_path_rate: Option<f64>,
     /// Load weights from a local `.safetensors` checkpoint instead of the Hub.
     pub checkpoint_path: Option<PathBuf>,
+    /// Build a headless feature extractor that stops after the deepest requested level.
+    pub features_only: bool,
+    /// Feature levels kept by [`Self::features_only`]; defaults to the deepest level.
+    pub out_indices: Option<Vec<usize>>,
+    /// Spatial reduction of the deepest stage: `32` (default), `16` or `8`.
+    pub output_stride: Option<usize>,
+    /// Wrap the checkpoint in the `NaFlexViT` variable-resolution container.
+    ///
+    /// Accepted but not implemented yet: the registry rejects it with
+    /// [`Error::InvalidConfiguration`] until the container lands.
+    pub use_naflex: bool,
 }
 
 impl CreateModelOptions {
@@ -54,6 +65,25 @@ impl CreateModelOptions {
     /// Loads weights from a local checkpoint.
     pub fn with_checkpoint(mut self, path: impl Into<PathBuf>) -> Self {
         self.checkpoint_path = Some(path.into());
+        self
+    }
+
+    /// Builds a headless extractor keeping only the levels in `out_indices`.
+    pub fn with_features_only(mut self, out_indices: impl IntoIterator<Item = usize>) -> Self {
+        self.features_only = true;
+        self.out_indices = Some(out_indices.into_iter().collect());
+        self
+    }
+
+    /// Sets the spatial reduction of the deepest stage (`32`, `16` or `8`).
+    pub fn with_output_stride(mut self, output_stride: usize) -> Self {
+        self.output_stride = Some(output_stride);
+        self
+    }
+
+    /// Loads the checkpoint through the `NaFlexViT` container (not implemented yet).
+    pub fn with_naflex(mut self, use_naflex: bool) -> Self {
+        self.use_naflex = use_naflex;
         self
     }
 }
@@ -557,12 +587,56 @@ pub fn create_model(
         .map(|config| config.num_classes)
         .or_else(|| pretrained_cfg.as_ref().map(|cfg| cfg.num_classes))
         .unwrap_or(1000);
-    let head = head_action(pretrained_classes, options.num_classes);
-    let num_classes = target_num_classes(pretrained_classes, options.num_classes);
+    let head = if options.features_only {
+        HeadAction::Remove
+    } else {
+        head_action(pretrained_classes, options.num_classes)
+    };
+    let num_classes = if options.features_only {
+        0
+    } else {
+        target_num_classes(pretrained_classes, options.num_classes)
+    };
     let in_chans = options
         .in_chans
         .or_else(|| pretrained_cfg.as_ref().map(|cfg| cfg.in_chans()))
         .unwrap_or(3);
+
+    if options.use_naflex {
+        return Err(Error::InvalidConfiguration(
+            "`use_naflex` requires the NaFlexViT container, which is not implemented yet"
+                .to_string(),
+        ));
+    }
+    if options.features_only {
+        if options.num_classes.unwrap_or(0) != 0 {
+            return Err(Error::InvalidConfiguration(
+                "`features_only` removes the classifier (`num_classes` must be 0 or unset)"
+                    .to_string(),
+            ));
+        }
+        if !matches!(info.family, Family::ResNet(_)) {
+            return Err(Error::InvalidConfiguration(format!(
+                "`features_only` is not supported by architecture `{}`",
+                id.arch
+            )));
+        }
+    } else if options.out_indices.is_some() {
+        return Err(Error::InvalidConfiguration(
+            "`out_indices` requires `features_only`".to_string(),
+        ));
+    }
+
+    // Families that cannot fold their stride into dilation must say so instead of ignoring the
+    // option; `output_stride = 32` is their nominal reduction, so it remains accepted.
+    if !matches!(info.family, Family::ResNet(_))
+        && let Some(output_stride) = options.output_stride.filter(|stride| *stride != 32)
+    {
+        return Err(Error::InvalidConfiguration(format!(
+            "`output_stride` {output_stride} is not supported by architecture `{}`",
+            id.arch
+        )));
+    }
 
     let mut model: Box<dyn VisionModel> = match info.family {
         Family::ResNet(spec) => {
@@ -579,12 +653,22 @@ pub fn create_model(
             if let Some(drop_rate) = options.drop_rate {
                 config = config.with_drop_rate(drop_rate);
             }
+            if let Some(output_stride) = options.output_stride {
+                config = config.with_output_stride(output_stride);
+            }
+            if options.features_only {
+                config = config
+                    .with_features_only(options.out_indices.clone().unwrap_or_else(|| vec![4]));
+            }
+            config.validate()?;
+
             let mut resnet = ResNet::new(config.clone(), device);
             let feature_info = resnet.feature_info().to_vec();
+            let num_features = resnet.num_features();
             resnet.set_meta(ModelMeta {
                 name: id.name.clone(),
                 num_classes,
-                num_features: config.num_features(),
+                num_features,
                 feature_info,
                 pretrained_cfg: pretrained_cfg.clone(),
             });
