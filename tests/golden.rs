@@ -92,6 +92,22 @@ fn check(arch: &str, tag: &str) {
     compare(&*model, &name, &path);
 }
 
+/// Same as [`check`], for the dilated variants (`output_stride` 16 and 8).
+fn check_output_stride(arch: &str, tag: &str, output_stride: usize) {
+    let name = format!("{arch}.{tag}.os{output_stride}");
+    let path = Path::new("tests/fixtures/golden").join(format!("{name}.safetensors"));
+    if !path.exists() {
+        panic!(
+            "missing fixture {}; run scripts/generate_fixtures.py",
+            path.display()
+        );
+    }
+
+    let options = CreateModelOptions::pretrained().with_output_stride(output_stride);
+    let model = create_model(&format!("{arch}.{tag}"), &options, &device()).unwrap();
+    compare(&*model, &name, &path);
+}
+
 fn compare(model: &dyn VisionModel, name: &str, path: &Path) {
     let input: Tensor<4> = load_tensor(path, "input", &device());
     let expected_logits: Tensor<2> = load_tensor(path, "logits", &device());
@@ -198,4 +214,18 @@ fn resnet50d_matches_timm() {
 #[ignore = "downloads pretrained weights from the Hugging Face Hub"]
 fn resnext50_matches_timm() {
     check("resnext50_32x4d", "a1h_in1k");
+}
+
+#[test]
+#[ignore = "downloads pretrained weights from the Hugging Face Hub"]
+fn resnet50_output_stride_matches_timm() {
+    check_output_stride("resnet50", "a1_in1k", 16);
+    check_output_stride("resnet50", "a1_in1k", 8);
+}
+
+#[test]
+#[ignore = "downloads pretrained weights from the Hugging Face Hub"]
+fn resnet50d_output_stride_matches_timm() {
+    check_output_stride("resnet50d", "ra2_in1k", 16);
+    check_output_stride("resnet50d", "ra2_in1k", 8);
 }

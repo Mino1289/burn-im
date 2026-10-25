@@ -65,6 +65,10 @@ Then:
 uv run python scripts/generate_fixtures.py
 ```
 
+Families that support `output_stride` also list their dilated variants in
+`OUTPUT_STRIDES`; those write `<arch>.<tag>.os<N>.safetensors` and are checked with
+`check_output_stride` in `tests/golden.rs`.
+
 The script runs the official checkpoint in `eval` mode on a deterministic input
 (`torch.manual_seed(0)`, `1×3×64×64`) and writes
 `tests/fixtures/golden/<arch>.<tag>.safetensors` with:

@@ -24,6 +24,14 @@ MODELS = {
     "resnext50_32x4d": "a1h_in1k",
 }
 
+# Dilated variants: `output_stride` below 32 folds the stride of the last stages into the
+# dilation of their convolutions. `resnet50d` also covers the average-pool downsample path.
+OUTPUT_STRIDES = {
+    ("resnet50", "a1_in1k"): [16, 8],
+    ("resnet50d", "ra2_in1k"): [16, 8],
+}
+
+
 
 def generate(arch: str, tag: str) -> None:
     torch.manual_seed(0)
@@ -62,6 +70,43 @@ def generate(arch: str, tag: str) -> None:
     out = OUT_DIR / f"{arch}.{tag}.safetensors"
     save_file({k: v.float().clone() for k, v in tensors.items()}, str(out))
     print(f"{out.name}: logits {tuple(logits.shape)}, {len(intermediates)} levels")
+
+
+def generate_output_stride(arch: str, tag: str, output_stride: int) -> None:
+    """Golden activations of a dilated variant (`output_stride` 16 or 8)."""
+    torch.manual_seed(0)
+    x = torch.randn(1, 3, 64, 64)
+
+    model = timm.create_model(
+        f"{arch}.{tag}", pretrained=True, output_stride=output_stride
+    ).eval()
+    with torch.no_grad():
+        logits = model(x)
+        pre_logits = model.forward_head(model.forward_features(x), pre_logits=True)
+        final, intermediates = model.forward_intermediates(
+            x,
+            indices=tuple(range(len(model.feature_info))),
+            stop_early=False,
+            output_fmt="NCHW",
+            intermediates_only=False,
+        )
+
+    tensors = {
+        "input": x,
+        "logits": logits,
+        "features": final,
+        "pre_logits": pre_logits,
+    }
+    for idx, level in enumerate(intermediates):
+        tensors[f"level_{idx}"] = level
+
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    out = OUT_DIR / f"{arch}.{tag}.os{output_stride}.safetensors"
+    save_file({k: v.float().clone() for k, v in tensors.items()}, str(out))
+    print(
+        f"{out.name}: logits {tuple(logits.shape)}, "
+        f"{len(intermediates)} levels, {tuple(final.shape)} features"
+    )
 
 
 def generate_alexnet() -> None:
@@ -110,6 +155,9 @@ def generate_alexnet() -> None:
 def main() -> None:
     for arch, tag in MODELS.items():
         generate(arch, tag)
+    for (arch, tag), strides in OUTPUT_STRIDES.items():
+        for output_stride in strides:
+            generate_output_stride(arch, tag, output_stride)
     generate_alexnet()
 
 
