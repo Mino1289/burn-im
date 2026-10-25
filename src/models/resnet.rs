@@ -6,12 +6,12 @@
 
 use burn::module::{Param, ParamId};
 use burn::nn::PaddingConfig2d;
-use burn::nn::conv::{Conv2d, Conv2dConfig};
+use burn::nn::conv::Conv2d;
 use burn::nn::pool::{AvgPool2d, AvgPool2dConfig, MaxPool2d, MaxPool2dConfig};
-use burn::nn::{BatchNorm, BatchNormConfig};
 use burn::prelude::*;
 use burn::tensor::activation::relu;
 
+use crate::layers::conv_norm_act::{Activation, ConvNormAct, ConvNormActConfig};
 use crate::layers::head::ClassifierHead;
 use crate::layers::pool::PoolMode;
 use crate::models::ModelMeta;
@@ -133,12 +133,9 @@ impl ResNetConfig {
 /// One 3x3 (basic) or 1x1-3x3-1x1 (bottleneck) residual block.
 #[derive(Module, Debug)]
 pub struct ResNetBlock {
-    conv1: Conv2d,
-    bn1: BatchNorm,
-    conv2: Conv2d,
-    bn2: BatchNorm,
-    conv3: Option<Conv2d>,
-    bn3: Option<BatchNorm>,
+    conv1: ConvNormAct,
+    conv2: ConvNormAct,
+    conv3: Option<ConvNormAct>,
     downsample: Option<Downsample>,
 }
 
@@ -148,15 +145,10 @@ impl ResNetBlock {
         let shortcut = input.clone();
 
         let x = self.conv1.forward(input);
-        let x = relu(self.bn1.forward(x));
         let x = self.conv2.forward(x);
-        let x = self.bn2.forward(x);
-        let x = match (&self.conv3, &self.bn3) {
-            (Some(conv3), Some(bn3)) => {
-                let x = relu(x);
-                bn3.forward(conv3.forward(x))
-            }
-            _ => x,
+        let x = match &self.conv3 {
+            Some(conv3) => conv3.forward(x),
+            None => x,
         };
 
         let shortcut = match &self.downsample {
@@ -171,8 +163,7 @@ impl ResNetBlock {
 #[derive(Module, Debug)]
 pub struct Downsample {
     avg: Option<AvgPool2d>,
-    conv: Conv2d,
-    bn: BatchNorm,
+    body: ConvNormAct,
 }
 
 impl Downsample {
@@ -181,20 +172,17 @@ impl Downsample {
             Some(avg) => avg.forward(input),
             None => input,
         };
-        self.bn.forward(self.conv.forward(x))
+        self.body.forward(x)
     }
 }
 
 /// Convolution stem, standard (one 7x7 conv) or deep (three 3x3 convs).
 #[derive(Module, Debug)]
 pub struct ResNetStem {
-    conv1: Option<Conv2d>,
-    conv_a: Option<Conv2d>,
-    bn_a: Option<BatchNorm>,
-    conv_b: Option<Conv2d>,
-    bn_b: Option<BatchNorm>,
-    conv_c: Option<Conv2d>,
-    bn1: BatchNorm,
+    conv1: Option<ConvNormAct>,
+    conv_a: Option<ConvNormAct>,
+    conv_b: Option<ConvNormAct>,
+    conv_c: Option<ConvNormAct>,
     #[module(skip)]
     deep: bool,
 }
@@ -203,34 +191,23 @@ impl ResNetStem {
     fn forward(&self, input: Tensor<4>) -> Tensor<4> {
         if !self.deep {
             let conv1 = self.conv1.as_ref().expect("standard stem convolution");
-            return relu(self.bn1.forward(conv1.forward(input)));
+            return conv1.forward(input);
         }
 
-        let x = relu(
-            self.bn_a.as_ref().expect("deep stem norm a").forward(
-                self.conv_a
-                    .as_ref()
-                    .expect("deep stem conv a")
-                    .forward(input),
-            ),
-        );
-        let x = relu(
-            self.bn_b
-                .as_ref()
-                .expect("deep stem norm b")
-                .forward(self.conv_b.as_ref().expect("deep stem conv b").forward(x)),
-        );
-        relu(
-            self.bn1
-                .forward(self.conv_c.as_ref().expect("deep stem conv c").forward(x)),
-        )
+        let x = self
+            .conv_a
+            .as_ref()
+            .expect("deep stem block a")
+            .forward(input);
+        let x = self.conv_b.as_ref().expect("deep stem block b").forward(x);
+        self.conv_c.as_ref().expect("deep stem block c").forward(x)
     }
 
     fn first_conv(&mut self) -> Option<&mut Conv2d> {
         if self.deep {
-            self.conv_a.as_mut()
+            self.conv_a.as_mut().map(ConvNormAct::conv_mut)
         } else {
-            self.conv1.as_mut()
+            self.conv1.as_mut().map(ConvNormAct::conv_mut)
         }
     }
 }
@@ -256,39 +233,43 @@ impl ResNet {
         let deep = config.stem == StemKind::Deep;
         let stem_chs = 64;
 
-        let (conv1, conv_a, bn_a, conv_b, bn_b, conv_c) = if deep {
+        let stem = if deep {
             // timm's `-d` variants: stem widths 32, 32, 64.
-            let conv_a = conv_layer(config.in_chans, 32, 3, 2, 1, 1, 1, device);
-            let conv_b = conv_layer(32, 32, 3, 1, 1, 1, 1, device);
-            let conv_c = conv_layer(32, stem_chs, 3, 1, 1, 1, 1, device);
-            (
-                None,
-                Some(conv_a),
-                Some(BatchNormConfig::new(32).init(device)),
-                Some(conv_b),
-                Some(BatchNormConfig::new(32).init(device)),
-                Some(conv_c),
-            )
+            ResNetStem {
+                conv1: None,
+                conv_a: Some(cna(
+                    config.in_chans,
+                    32,
+                    3,
+                    2,
+                    1,
+                    1,
+                    1,
+                    Activation::Relu,
+                    device,
+                )),
+                conv_b: Some(cna(32, 32, 3, 1, 1, 1, 1, Activation::Relu, device)),
+                conv_c: Some(cna(32, stem_chs, 3, 1, 1, 1, 1, Activation::Relu, device)),
+                deep,
+            }
         } else {
-            (
-                Some(conv_layer(config.in_chans, stem_chs, 7, 2, 3, 1, 1, device)),
-                None,
-                None,
-                None,
-                None,
-                None,
-            )
-        };
-
-        let stem = ResNetStem {
-            conv1,
-            conv_a,
-            bn_a,
-            conv_b,
-            bn_b,
-            conv_c,
-            bn1: BatchNormConfig::new(stem_chs).init(device),
-            deep,
+            ResNetStem {
+                conv1: Some(cna(
+                    config.in_chans,
+                    stem_chs,
+                    7,
+                    2,
+                    3,
+                    1,
+                    1,
+                    Activation::Relu,
+                    device,
+                )),
+                conv_a: None,
+                conv_b: None,
+                conv_c: None,
+                deep,
+            }
         };
 
         let mut inplanes = stem_chs;
@@ -394,23 +375,32 @@ impl ResNet {
         let mut remaps = vec![("^fc\\.", "head.fc.")];
         match config.stem {
             StemKind::Standard => {
-                remaps.push(("^conv1\\.", "stem.conv1."));
+                remaps.push(("^conv1\\.([a-z_]+)$", "stem.conv1.conv.$1"));
+                remaps.push(("^bn1\\.([a-z_]+)$", "stem.conv1.norm.$1"));
             }
             StemKind::Deep => {
-                remaps.push(("^conv1\\.0\\.", "stem.conv_a."));
-                remaps.push(("^conv1\\.1\\.", "stem.bn_a."));
-                remaps.push(("^conv1\\.3\\.", "stem.conv_b."));
-                remaps.push(("^conv1\\.4\\.", "stem.bn_b."));
-                remaps.push(("^conv1\\.6\\.", "stem.conv_c."));
+                remaps.push(("^conv1\\.0\\.([a-z_]+)$", "stem.conv_a.conv.$1"));
+                remaps.push(("^conv1\\.1\\.([a-z_]+)$", "stem.conv_a.norm.$1"));
+                remaps.push(("^conv1\\.3\\.([a-z_]+)$", "stem.conv_b.conv.$1"));
+                remaps.push(("^conv1\\.4\\.([a-z_]+)$", "stem.conv_b.norm.$1"));
+                remaps.push(("^conv1\\.6\\.([a-z_]+)$", "stem.conv_c.conv.$1"));
+                remaps.push(("^bn1\\.([a-z_]+)$", "stem.conv_c.norm.$1"));
             }
         }
-        remaps.push(("^bn1\\.", "stem.bn1."));
+        remaps.push((
+            "^(layer[1-4]\\.\\d+)\\.conv([123])\\.([a-z_]+)$",
+            "$1.conv$2.conv.$3",
+        ));
+        remaps.push((
+            "^(layer[1-4]\\.\\d+)\\.bn([123])\\.([a-z_]+)$",
+            "$1.conv$2.norm.$3",
+        ));
         if config.avg_down {
-            remaps.push(("\\.downsample\\.1\\.", ".downsample.conv."));
-            remaps.push(("\\.downsample\\.2\\.", ".downsample.bn."));
+            remaps.push(("\\.downsample\\.1\\.", ".downsample.body.conv."));
+            remaps.push(("\\.downsample\\.2\\.", ".downsample.body.norm."));
         } else {
-            remaps.push(("\\.downsample\\.0\\.", ".downsample.conv."));
-            remaps.push(("\\.downsample\\.1\\.", ".downsample.bn."));
+            remaps.push(("\\.downsample\\.0\\.", ".downsample.body.conv."));
+            remaps.push(("\\.downsample\\.1\\.", ".downsample.body.norm."));
         }
         remaps
     }
@@ -523,7 +513,7 @@ impl VisionModel for ResNet {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn conv_layer(
+fn cna(
     in_chans: usize,
     out_chans: usize,
     kernel: usize,
@@ -531,16 +521,16 @@ fn conv_layer(
     padding: usize,
     dilation: usize,
     groups: usize,
+    activation: Activation,
     device: &Device,
-) -> Conv2d {
-    Conv2dConfig::new([in_chans, out_chans], [kernel, kernel])
-        .with_stride([stride, stride])
-        .with_padding(PaddingConfig2d::Explicit(
-            padding, padding, padding, padding,
-        ))
-        .with_dilation([dilation, dilation])
+) -> ConvNormAct {
+    ConvNormActConfig::new(in_chans, out_chans)
+        .with_kernel_size(kernel)
+        .with_stride(stride)
+        .with_padding(padding)
+        .with_dilation(dilation)
         .with_groups(groups)
-        .with_bias(false)
+        .with_activation(activation)
         .init(device)
 }
 
@@ -570,7 +560,7 @@ fn build_stage(
     let downsample = needs_projection.then(|| Downsample {
         avg: (config.avg_down && stride != 1)
             .then(|| AvgPool2dConfig::new([2, 2]).with_strides([2, 2]).init()),
-        conv: conv_layer(
+        body: cna(
             *inplanes,
             outplanes,
             1,
@@ -578,9 +568,9 @@ fn build_stage(
             0,
             1,
             1,
+            Activation::None,
             device,
         ),
-        bn: BatchNormConfig::new(outplanes).init(device),
     });
 
     for block_idx in 0..num_blocks {
@@ -591,43 +581,55 @@ fn build_stage(
             None
         };
 
-        let (conv1, bn1) = match config.block {
-            BlockKind::Basic => (
-                conv_layer(*inplanes, width, 3, block_stride, 1, 1, 1, device),
-                BatchNormConfig::new(width).init(device),
+        let conv1 = match config.block {
+            BlockKind::Basic => cna(
+                *inplanes,
+                width,
+                3,
+                block_stride,
+                1,
+                1,
+                1,
+                Activation::Relu,
+                device,
             ),
-            BlockKind::Bottleneck => (
-                conv_layer(*inplanes, width, 1, 1, 0, 1, 1, device),
-                BatchNormConfig::new(width).init(device),
+            BlockKind::Bottleneck => cna(*inplanes, width, 1, 1, 0, 1, 1, Activation::Relu, device),
+        };
+
+        let conv2 = match config.block {
+            BlockKind::Basic => cna(width, outplanes, 3, 1, 1, 1, 1, Activation::None, device),
+            BlockKind::Bottleneck => cna(
+                width,
+                width,
+                3,
+                block_stride,
+                1,
+                1,
+                config.groups,
+                Activation::Relu,
+                device,
             ),
         };
 
-        let (conv2, bn2) = match config.block {
-            BlockKind::Basic => (
-                conv_layer(width, outplanes, 3, 1, 1, 1, 1, device),
-                BatchNormConfig::new(outplanes).init(device),
-            ),
-            BlockKind::Bottleneck => (
-                conv_layer(width, width, 3, block_stride, 1, 1, config.groups, device),
-                BatchNormConfig::new(width).init(device),
-            ),
-        };
-
-        let (conv3, bn3) = match config.block {
-            BlockKind::Bottleneck => (
-                Some(conv_layer(width, outplanes, 1, 1, 0, 1, 1, device)),
-                Some(BatchNormConfig::new(outplanes).init(device)),
-            ),
-            BlockKind::Basic => (None, None),
+        let conv3 = match config.block {
+            BlockKind::Bottleneck => Some(cna(
+                width,
+                outplanes,
+                1,
+                1,
+                0,
+                1,
+                1,
+                Activation::None,
+                device,
+            )),
+            BlockKind::Basic => None,
         };
 
         out.push(ResNetBlock {
             conv1,
-            bn1,
             conv2,
-            bn2,
             conv3,
-            bn3,
             downsample: block_downsample,
         });
         *inplanes = outplanes;

@@ -128,13 +128,13 @@ fn module_paths_match_checkpoint_layout() {
         .collect();
 
     for expected in [
-        "stem.conv1.weight",
-        "stem.bn1.gamma",
-        "stem.bn1.running_mean",
-        "layer1.0.conv1.weight",
-        "layer1.0.downsample.conv.weight",
-        "layer1.0.downsample.bn.running_var",
-        "layer4.2.conv3.weight",
+        "stem.conv1.conv.weight",
+        "stem.conv1.norm.gamma",
+        "stem.conv1.norm.running_mean",
+        "layer1.0.conv1.conv.weight",
+        "layer1.0.downsample.body.conv.weight",
+        "layer1.0.downsample.body.norm.running_var",
+        "layer4.2.conv3.conv.weight",
         "head.fc.weight",
         "head.fc.bias",
     ] {
@@ -155,14 +155,14 @@ fn module_paths_match_checkpoint_layout() {
         .map(|tensor| tensor.name)
         .collect();
     for expected in [
-        "stem.conv_a.weight",
-        "stem.bn_a.gamma",
-        "stem.conv_b.weight",
-        "stem.bn_b.gamma",
-        "stem.conv_c.weight",
-        "stem.bn1.gamma",
-        "layer2.0.downsample.conv.weight",
-        "layer2.0.downsample.bn.gamma",
+        "stem.conv_a.conv.weight",
+        "stem.conv_a.norm.gamma",
+        "stem.conv_b.conv.weight",
+        "stem.conv_b.norm.gamma",
+        "stem.conv_c.conv.weight",
+        "stem.conv_c.norm.gamma",
+        "layer2.0.downsample.body.conv.weight",
+        "layer2.0.downsample.body.norm.gamma",
     ] {
         assert!(
             paths.iter().any(|path| path == expected),
