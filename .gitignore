@@ -28,3 +28,4 @@ plan.md
 .venv/
 .base-ast/
 examples/data/
+.base

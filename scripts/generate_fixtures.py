@@ -22,6 +22,8 @@ MODELS = {
     "resnet50": "a1_in1k",
     "resnet50d": "ra2_in1k",
     "resnext50_32x4d": "a1h_in1k",
+    "convnext_tiny": "fb_in22k_ft_in1k",
+    "convnextv2_tiny": "fcmae_ft_in22k_in1k",
 }
 
 # Dilated variants: `output_stride` below 32 folds the stride of the last stages into the
@@ -29,6 +31,7 @@ MODELS = {
 OUTPUT_STRIDES = {
     ("resnet50", "a1_in1k"): [16, 8],
     ("resnet50d", "ra2_in1k"): [16, 8],
+    ("convnext_tiny", "fb_in22k_ft_in1k"): [16],
 }
 
 
@@ -56,7 +59,7 @@ def generate(arch: str, tag: str) -> None:
         "pre_logits": pre_logits.contiguous(),
     }
 
-    if arch == "resnet18":
+    if arch in ("resnet18", "convnext_tiny"):
         # One-channel input: timm adapts the 3-channel stem by summing the kernels.
         x1 = torch.randn(1, 1, 64, 64)
         model1 = timm.create_model(f"{arch}.{tag}", pretrained=True, in_chans=1).eval()
@@ -94,15 +97,15 @@ def generate_output_stride(arch: str, tag: str, output_stride: int) -> None:
     tensors = {
         "input": x,
         "logits": logits,
-        "features": final,
-        "pre_logits": pre_logits,
+        "features": final.contiguous(),
+        "pre_logits": pre_logits.contiguous(),
     }
     for idx, level in enumerate(intermediates):
-        tensors[f"level_{idx}"] = level
+        tensors[f"level_{idx}"] = level.contiguous()
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     out = OUT_DIR / f"{arch}.{tag}.os{output_stride}.safetensors"
-    save_file({k: v.float().clone() for k, v in tensors.items()}, str(out))
+    save_file({k: v.float().contiguous().clone() for k, v in tensors.items()}, str(out))
     print(
         f"{out.name}: logits {tuple(logits.shape)}, "
         f"{len(intermediates)} levels, {tuple(final.shape)} features"

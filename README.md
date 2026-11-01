@@ -229,8 +229,8 @@ and parity-test workflow.
 - [x] AlexNet
 - [x] `forward_intermediates` + `FeatureInfo` (timm 1.0 semantics)
 - [x] Non-RGB input adaptation, classifier replacement, headless models
+- [x] ConvNeXt and ConvNeXt-V2 families
 - [ ] SE-ResNet and EfficientNet families
-- [ ] ConvNeXt
 - [ ] Vision Transformer (ViT) and `Nlc` feature format
 
 ## License

@@ -552,12 +552,7 @@ static MODELS: &[ModelInfo] = &[
         arch: "convnext_large",
         family: convnext([3, 3, 27, 3], [192, 384, 768, 1536]),
         default_tag: Some("fb_in22k_ft_in1k"),
-        tags: &[
-            "dinov3_lvd1689m",
-            "fb_in1k",
-            "fb_in22k",
-            "fb_in22k_ft_in1k",
-        ],
+        tags: &["dinov3_lvd1689m", "fb_in1k", "fb_in22k", "fb_in22k_ft_in1k"],
         num_features: 1536,
     },
     ModelInfo {

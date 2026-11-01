@@ -267,7 +267,10 @@ fn convnext_reports_dilated_reductions() {
         (16, vec![4, 8, 16, 16], [1, 768, 4, 4]),
         (8, vec![4, 8, 8, 8], [1, 768, 8, 8]),
     ] {
-        let model = ConvNeXt::new(convnext_tiny(1000).with_output_stride(output_stride), &device);
+        let model = ConvNeXt::new(
+            convnext_tiny(1000).with_output_stride(output_stride),
+            &device,
+        );
         let actual: Vec<usize> = model.feature_info().iter().map(|f| f.reduction).collect();
         assert_eq!(actual, reductions, "output stride {output_stride}");
 

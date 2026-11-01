@@ -138,12 +138,14 @@ impl ConvNeXtConfig {
                 self.drop_path_rate
             )));
         }
-        if let Some(stride) = self.output_stride {
-            if stride != 32 && stride != 16 && stride != 8 {
-                return Err(Error::InvalidConfiguration(format!(
-                    "output_stride must be 32, 16, or 8, got {stride}"
-                )));
-            }
+        if let Some(stride) = self.output_stride
+            && stride != 32
+            && stride != 16
+            && stride != 8
+        {
+            return Err(Error::InvalidConfiguration(format!(
+                "output_stride must be 32, 16, or 8, got {stride}"
+            )));
         }
         if self.features_only {
             if self.num_classes != 0 {
@@ -225,42 +227,58 @@ pub fn convnext_xlarge(num_classes: usize) -> ConvNeXtConfig {
 
 /// `convnextv2_atto`: depths [2, 2, 6, 2], dims [40, 80, 160, 320] with GRN and no LayerScale.
 pub fn convnextv2_atto(num_classes: usize) -> ConvNeXtConfig {
-    convnext_atto(num_classes).with_grn(true).with_ls_init_value(None)
+    convnext_atto(num_classes)
+        .with_grn(true)
+        .with_ls_init_value(None)
 }
 
 /// `convnextv2_femto`: depths [2, 2, 6, 2], dims [48, 96, 192, 384] with GRN and no LayerScale.
 pub fn convnextv2_femto(num_classes: usize) -> ConvNeXtConfig {
-    convnext_femto(num_classes).with_grn(true).with_ls_init_value(None)
+    convnext_femto(num_classes)
+        .with_grn(true)
+        .with_ls_init_value(None)
 }
 
 /// `convnextv2_pico`: depths [2, 2, 6, 2], dims [64, 128, 256, 512] with GRN and no LayerScale.
 pub fn convnextv2_pico(num_classes: usize) -> ConvNeXtConfig {
-    convnext_pico(num_classes).with_grn(true).with_ls_init_value(None)
+    convnext_pico(num_classes)
+        .with_grn(true)
+        .with_ls_init_value(None)
 }
 
 /// `convnextv2_nano`: depths [2, 2, 8, 2], dims [80, 160, 320, 640] with GRN and no LayerScale.
 pub fn convnextv2_nano(num_classes: usize) -> ConvNeXtConfig {
-    convnext_nano(num_classes).with_grn(true).with_ls_init_value(None)
+    convnext_nano(num_classes)
+        .with_grn(true)
+        .with_ls_init_value(None)
 }
 
 /// `convnextv2_tiny`: depths [3, 3, 9, 3], dims [96, 192, 384, 768] with GRN and no LayerScale.
 pub fn convnextv2_tiny(num_classes: usize) -> ConvNeXtConfig {
-    convnext_tiny(num_classes).with_grn(true).with_ls_init_value(None)
+    convnext_tiny(num_classes)
+        .with_grn(true)
+        .with_ls_init_value(None)
 }
 
 /// `convnextv2_small`: depths [3, 3, 27, 3], dims [96, 192, 384, 768] with GRN and no LayerScale.
 pub fn convnextv2_small(num_classes: usize) -> ConvNeXtConfig {
-    convnext_small(num_classes).with_grn(true).with_ls_init_value(None)
+    convnext_small(num_classes)
+        .with_grn(true)
+        .with_ls_init_value(None)
 }
 
 /// `convnextv2_base`: depths [3, 3, 27, 3], dims [128, 256, 512, 1024] with GRN and no LayerScale.
 pub fn convnextv2_base(num_classes: usize) -> ConvNeXtConfig {
-    convnext_base(num_classes).with_grn(true).with_ls_init_value(None)
+    convnext_base(num_classes)
+        .with_grn(true)
+        .with_ls_init_value(None)
 }
 
 /// `convnextv2_large`: depths [3, 3, 27, 3], dims [192, 384, 768, 1536] with GRN and no LayerScale.
 pub fn convnextv2_large(num_classes: usize) -> ConvNeXtConfig {
-    convnext_large(num_classes).with_grn(true).with_ls_init_value(None)
+    convnext_large(num_classes)
+        .with_grn(true)
+        .with_ls_init_value(None)
 }
 
 /// `convnextv2_huge`: depths [3, 3, 27, 3], dims [352, 704, 1408, 2816] with GRN and no LayerScale.
@@ -415,15 +433,16 @@ impl ConvNeXtBlock {
         let conv_dw = Conv2dConfig::new([dim, dim], [7, 7])
             .with_stride([1, 1])
             .with_dilation([dilation, dilation])
-            .with_padding(PaddingConfig2d::Explicit(padding, padding, padding, padding))
+            .with_padding(PaddingConfig2d::Explicit(
+                padding, padding, padding, padding,
+            ))
             .with_groups(dim)
             .with_bias(true)
             .init(device);
         let norm = LayerNormConfig::new(dim).with_epsilon(1e-6).init(device);
         let mlp = ConvNeXtMlp::new(dim, use_grn, device);
-        let gamma = ls_init_value.map(|val| {
-            Initializer::Constant { value: val }.init([dim], device)
-        });
+        let gamma =
+            ls_init_value.map(|val| Initializer::Constant { value: val }.init([dim], device));
         let drop_path = DropPath::new(drop_path_rate);
 
         Self {
@@ -468,6 +487,7 @@ pub struct ConvNeXtStage {
 
 impl ConvNeXtStage {
     /// Creates a stage.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         in_chans: usize,
         out_chans: usize,
@@ -479,9 +499,8 @@ impl ConvNeXtStage {
         use_grn: bool,
         device: &Device,
     ) -> Self {
-        let downsample = (in_chans != out_chans || stride > 1 || dilation.0 != dilation.1).then(|| {
-            ConvNeXtDownsample::new(in_chans, out_chans, stride, dilation, device)
-        });
+        let downsample = (in_chans != out_chans || stride > 1 || dilation.0 != dilation.1)
+            .then(|| ConvNeXtDownsample::new(in_chans, out_chans, stride, dilation, device));
 
         let blocks = (0..depth)
             .map(|i| {
@@ -562,7 +581,7 @@ impl ConvNeXt {
 
         const MODULE_NAMES: [&str; 4] = ["stages.0", "stages.1", "stages.2", "stages.3"];
 
-        for i in 0..=max_stage {
+        for (i, &module_name) in MODULE_NAMES.iter().enumerate().take(max_stage + 1) {
             let mut stride = if i > 0 { 2 } else { 1 };
             if curr_stride >= output_stride && stride > 1 {
                 dilation *= stride;
@@ -590,11 +609,15 @@ impl ConvNeXt {
             stages.push(stage);
             prev_chs = out_chs;
 
-            feature_info.push(FeatureInfo::new(i, prev_chs, curr_stride, MODULE_NAMES[i]));
+            feature_info.push(FeatureInfo::new(i, prev_chs, curr_stride, module_name));
         }
 
         let num_features = prev_chs;
-        let norm_eps = if config.features_only { None } else { Some(1e-6) };
+        let norm_eps = if config.features_only {
+            None
+        } else {
+            Some(1e-6)
+        };
         let head = NormMlpClassifierHead::new(
             num_features,
             config.num_classes,
@@ -639,8 +662,14 @@ impl ConvNeXt {
         vec![
             ("^stem\\.0\\.([a-z_]+)$", "stem.conv.$1"),
             ("^stem\\.1\\.([a-z_]+)$", "stem.norm.norm.$1"),
-            ("^stages\\.(\\d+)\\.downsample\\.0\\.([a-z_]+)$", "stages.$1.downsample.norm.norm.$2"),
-            ("^stages\\.(\\d+)\\.downsample\\.1\\.([a-z_]+)$", "stages.$1.downsample.conv.$2"),
+            (
+                "^stages\\.(\\d+)\\.downsample\\.0\\.([a-z_]+)$",
+                "stages.$1.downsample.norm.norm.$2",
+            ),
+            (
+                "^stages\\.(\\d+)\\.downsample\\.1\\.([a-z_]+)$",
+                "stages.$1.downsample.conv.$2",
+            ),
             ("^head\\.norm\\.([a-z_]+)$", "head.norm.norm.$1"),
         ]
     }
@@ -733,4 +762,3 @@ impl VisionModel for ConvNeXt {
         self
     }
 }
-

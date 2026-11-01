@@ -45,9 +45,9 @@ impl LayerNorm2d {
 #[derive(Module, Debug)]
 pub struct GlobalResponseNorm {
     /// Trainable per-channel scale (`timm`'s `weight`).
-    pub gamma: Param<Tensor<1>>,
+    pub weight: Param<Tensor<1>>,
     /// Trainable per-channel bias (`timm`'s `bias`).
-    pub beta: Param<Tensor<1>>,
+    pub bias: Param<Tensor<1>>,
 }
 
 impl GlobalResponseNorm {
@@ -57,8 +57,8 @@ impl GlobalResponseNorm {
     /// Creates a zero-initialized GRN layer for `num_channels` channels.
     pub fn new(num_channels: usize, device: &Device) -> Self {
         Self {
-            gamma: Initializer::Zeros.init([num_channels], device),
-            beta: Initializer::Zeros.init([num_channels], device),
+            weight: Initializer::Zeros.init([num_channels], device),
+            bias: Initializer::Zeros.init([num_channels], device),
         }
     }
 
@@ -68,8 +68,8 @@ impl GlobalResponseNorm {
         let norm = input.clone().square().sum_dim(2).sum_dim(3).sqrt();
         let response = norm.clone() / norm.mean_dim(1).add_scalar(Self::EPS);
         input.clone()
-            + self.beta.val().reshape([1, channels, 1, 1])
-            + self.gamma.val().reshape([1, channels, 1, 1]) * input * response
+            + self.bias.val().reshape([1, channels, 1, 1])
+            + self.weight.val().reshape([1, channels, 1, 1]) * input * response
     }
 
     /// Applies GRN to `[B, H, W, C]` (channels-last layout, as used inside ConvNeXt-V2 blocks).
@@ -78,7 +78,7 @@ impl GlobalResponseNorm {
         let norm = input.clone().square().sum_dim(1).sum_dim(2).sqrt();
         let response = norm.clone() / norm.mean_dim(3).add_scalar(Self::EPS);
         input.clone()
-            + self.beta.val().reshape([1, 1, 1, channels])
-            + self.gamma.val().reshape([1, 1, 1, channels]) * input * response
+            + self.bias.val().reshape([1, 1, 1, channels])
+            + self.weight.val().reshape([1, 1, 1, channels]) * input * response
     }
 }

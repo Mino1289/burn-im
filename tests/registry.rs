@@ -3,7 +3,6 @@
 use burn::tensor::{Device, Tensor};
 use burn_im::hub::config::TimmHfConfig;
 use burn_im::registry::split_model_name_tag;
-use burn_im::traits::IntermediatesOptions;
 use burn_im::{CreateModelOptions, create_model, is_model, list_models, list_pretrained};
 
 fn device() -> Device {
@@ -163,8 +162,7 @@ fn creates_convnext_from_registry() {
 
 #[test]
 fn creates_convnextv2_from_registry() {
-    let model =
-        create_model("convnextv2_tiny", &CreateModelOptions::default(), &device()).unwrap();
+    let model = create_model("convnextv2_tiny", &CreateModelOptions::default(), &device()).unwrap();
     assert_eq!(model.num_classes(), 1000);
     assert_eq!(model.num_features(), 768);
     assert_eq!(model.feature_info().len(), 4);

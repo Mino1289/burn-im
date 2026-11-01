@@ -229,3 +229,39 @@ fn resnet50d_output_stride_matches_timm() {
     check_output_stride("resnet50d", "ra2_in1k", 16);
     check_output_stride("resnet50d", "ra2_in1k", 8);
 }
+
+#[test]
+#[ignore = "downloads pretrained weights from the Hugging Face Hub"]
+fn convnext_tiny_matches_timm() {
+    check("convnext_tiny", "fb_in22k_ft_in1k");
+}
+
+#[test]
+#[ignore = "downloads pretrained weights from the Hugging Face Hub"]
+fn convnext_tiny_in_chans_adaptation_matches_timm() {
+    let path = Path::new("tests/fixtures/golden/convnext_tiny.fb_in22k_ft_in1k.safetensors");
+    let options = CreateModelOptions::pretrained().with_in_chans(1);
+    let model = create_model("convnext_tiny.fb_in22k_ft_in1k", &options, &device()).unwrap();
+    assert_eq!(model.num_classes(), 1000);
+
+    let input: Tensor<4> = load_tensor(path, "input_1ch", &device());
+    let expected: Tensor<2> = load_tensor(path, "logits_1ch", &device());
+    let diff = assert_close(
+        &values(model.forward(input)),
+        &values(expected),
+        "convnext_tiny 1-channel logits",
+    );
+    println!("convnext_tiny in_chans=1: logits {diff:.3e}");
+}
+
+#[test]
+#[ignore = "downloads pretrained weights from the Hugging Face Hub"]
+fn convnextv2_tiny_matches_timm() {
+    check("convnextv2_tiny", "fcmae_ft_in22k_in1k");
+}
+
+#[test]
+#[ignore = "downloads pretrained weights from the Hugging Face Hub"]
+fn convnext_tiny_output_stride_matches_timm() {
+    check_output_stride("convnext_tiny", "fb_in22k_ft_in1k", 16);
+}

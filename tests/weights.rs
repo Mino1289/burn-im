@@ -154,3 +154,96 @@ fn one_channel_pretrained_resnet18() {
     let out = model.forward(Tensor::zeros([1, 1, 64, 64], &device()));
     assert_eq!(out.dims(), [1, 1000]);
 }
+
+#[test]
+#[ignore = "downloads weights from the Hugging Face Hub"]
+fn loads_convnext_tiny_and_runs_inference() {
+    let repo = Hub::repo_id("convnext_tiny", "fb_in22k_ft_in1k");
+    let hub = Hub::new().unwrap();
+    let path = hub.weights(&repo).unwrap();
+    let config = burn_im::models::convnext::convnext_tiny(1000);
+    let remaps = burn_im::models::convnext::ConvNeXt::key_remaps();
+    let mut model = burn_im::models::convnext::ConvNeXt::new(config, &device());
+    let report = load_safetensors(&mut model, &path, &remaps).unwrap();
+    println!(
+        "ConvNeXt report: applied={}, missing={:?}, unused={:?}, errors={:?}",
+        report.applied, report.missing, report.unused, report.errors
+    );
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
+    assert!(report.missing.is_empty(), "{:?}", report.missing);
+
+    let logits = model.forward(Tensor::zeros([1, 3, 224, 224], &device()));
+    assert_eq!(logits.dims(), [1, 1000]);
+    assert!(
+        logits
+            .into_data()
+            .as_slice::<f32>()
+            .unwrap()
+            .iter()
+            .all(|v| v.is_finite())
+    );
+}
+
+#[test]
+#[ignore = "downloads weights from the Hugging Face Hub"]
+fn loads_convnextv2_tiny_and_runs_inference() {
+    let repo = Hub::repo_id("convnextv2_tiny", "fcmae_ft_in22k_in1k");
+    let hub = Hub::new().unwrap();
+    let path = hub.weights(&repo).unwrap();
+    let config = burn_im::models::convnext::convnextv2_tiny(1000);
+    let remaps = burn_im::models::convnext::ConvNeXt::key_remaps();
+    let mut model = burn_im::models::convnext::ConvNeXt::new(config, &device());
+    let report = load_safetensors(&mut model, &path, &remaps).unwrap();
+    println!(
+        "ConvNeXtV2 report: applied={}, missing={:?}, unused={:?}, errors={:?}",
+        report.applied, report.missing, report.unused, report.errors
+    );
+    assert!(report.errors.is_empty(), "{:?}", report.errors);
+    assert!(report.missing.is_empty(), "{:?}", report.missing);
+
+    let logits = model.forward(Tensor::zeros([1, 3, 224, 224], &device()));
+    assert_eq!(logits.dims(), [1, 1000]);
+    assert!(
+        logits
+            .into_data()
+            .as_slice::<f32>()
+            .unwrap()
+            .iter()
+            .all(|v| v.is_finite())
+    );
+}
+
+#[test]
+#[ignore = "downloads weights from the Hugging Face Hub"]
+fn headless_pretrained_convnext_tiny() {
+    let options = burn_im::CreateModelOptions::pretrained().with_num_classes(0);
+    let model =
+        burn_im::create_model("convnext_tiny.fb_in22k_ft_in1k", &options, &device()).unwrap();
+    assert_eq!(model.num_classes(), 0);
+
+    let out = model.forward(Tensor::zeros([1, 3, 64, 64], &device()));
+    assert_eq!(out.dims(), [1, 768]);
+}
+
+#[test]
+#[ignore = "downloads weights from the Hugging Face Hub"]
+fn resized_head_pretrained_convnext_tiny() {
+    let options = burn_im::CreateModelOptions::pretrained().with_num_classes(10);
+    let model =
+        burn_im::create_model("convnext_tiny.fb_in22k_ft_in1k", &options, &device()).unwrap();
+    assert_eq!(model.num_classes(), 10);
+
+    let out = model.forward(Tensor::zeros([1, 3, 64, 64], &device()));
+    assert_eq!(out.dims(), [1, 10]);
+}
+
+#[test]
+#[ignore = "downloads weights from the Hugging Face Hub"]
+fn one_channel_pretrained_convnext_tiny() {
+    let options = burn_im::CreateModelOptions::pretrained().with_in_chans(1);
+    let model =
+        burn_im::create_model("convnext_tiny.fb_in22k_ft_in1k", &options, &device()).unwrap();
+
+    let out = model.forward(Tensor::zeros([1, 1, 64, 64], &device()));
+    assert_eq!(out.dims(), [1, 1000]);
+}

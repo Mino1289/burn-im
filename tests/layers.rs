@@ -57,8 +57,8 @@ fn global_response_norm_matches_reference() {
     let eps = 1e-6f64;
 
     let mut grn = GlobalResponseNorm::new(2, &device);
-    grn.gamma = Param::from_data(gamma, &device);
-    grn.beta = Param::from_data(beta, &device);
+    grn.weight = Param::from_data(gamma, &device);
+    grn.bias = Param::from_data(beta, &device);
 
     let output = values(grn.forward(Tensor::from_data(TensorData::from(input), &device)));
 
