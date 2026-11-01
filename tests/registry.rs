@@ -3,6 +3,7 @@
 use burn::tensor::{Device, Tensor};
 use burn_im::hub::config::TimmHfConfig;
 use burn_im::registry::split_model_name_tag;
+use burn_im::traits::IntermediatesOptions;
 use burn_im::{CreateModelOptions, create_model, is_model, list_models, list_pretrained};
 
 fn device() -> Device {
@@ -43,7 +44,8 @@ fn lists_and_finds_models() {
     assert!(is_model("resnet50"));
     assert!(is_model("resnet50.a1_in1k"));
     assert!(is_model("hf-hub:timm/resnet50.a1_in1k"));
-    assert!(!is_model("convnext_tiny"));
+    assert!(is_model("convnext_tiny"));
+    assert!(!is_model("vit_base_patch16_224"));
 
     let pairs = list_pretrained(Some("*resnet50d*"));
     assert!(pairs.contains(&"resnet50d.ra2_in1k".to_string()));
@@ -130,4 +132,59 @@ fn alexnet_has_no_pretrained_hub_weights() {
         .err()
         .expect("alexnet has no Hub weights");
     assert!(matches!(err, burn_im::Error::UnknownTag { .. }));
+}
+
+#[test]
+fn creates_convnext_from_registry() {
+    let model = create_model("convnext_tiny", &CreateModelOptions::default(), &device()).unwrap();
+    assert_eq!(model.num_classes(), 1000);
+    assert_eq!(model.num_features(), 768);
+    assert_eq!(model.feature_info().len(), 4);
+    assert_eq!(model.feature_info()[0].reduction, 4);
+    assert_eq!(model.feature_info()[3].reduction, 32);
+    assert_eq!(model.model_name(), "convnext_tiny");
+
+    let logits = model.forward(Tensor::zeros([1, 3, 64, 64], &device()));
+    assert_eq!(logits.dims(), [1, 1000]);
+
+    // Headless and resized head
+    let options = CreateModelOptions::default().with_num_classes(0);
+    let headless = create_model("convnext_tiny", &options, &device()).unwrap();
+    assert_eq!(headless.num_classes(), 0);
+    let out = headless.forward(Tensor::zeros([1, 3, 64, 64], &device()));
+    assert_eq!(out.dims(), [1, 768]);
+
+    let options = CreateModelOptions::default().with_num_classes(10);
+    let resized = create_model("convnext_tiny", &options, &device()).unwrap();
+    assert_eq!(resized.num_classes(), 10);
+    let out = resized.forward(Tensor::zeros([1, 3, 64, 64], &device()));
+    assert_eq!(out.dims(), [1, 10]);
+}
+
+#[test]
+fn creates_convnextv2_from_registry() {
+    let model =
+        create_model("convnextv2_tiny", &CreateModelOptions::default(), &device()).unwrap();
+    assert_eq!(model.num_classes(), 1000);
+    assert_eq!(model.num_features(), 768);
+    assert_eq!(model.feature_info().len(), 4);
+    assert_eq!(model.model_name(), "convnextv2_tiny");
+
+    let logits = model.forward(Tensor::zeros([1, 3, 64, 64], &device()));
+    assert_eq!(logits.dims(), [1, 1000]);
+}
+
+#[test]
+fn creates_convnext_output_stride() {
+    let options = CreateModelOptions::default().with_output_stride(16);
+    let model = create_model("convnext_tiny", &options, &device()).unwrap();
+    assert_eq!(model.feature_info()[3].reduction, 16);
+    let feats = model.forward_features(Tensor::zeros([1, 3, 64, 64], &device()));
+    assert_eq!(feats.dims(), [1, 768, 4, 4]);
+
+    let options = CreateModelOptions::default().with_output_stride(8);
+    let model = create_model("convnext_tiny", &options, &device()).unwrap();
+    assert_eq!(model.feature_info()[3].reduction, 8);
+    let feats = model.forward_features(Tensor::zeros([1, 3, 64, 64], &device()));
+    assert_eq!(feats.dims(), [1, 768, 8, 8]);
 }

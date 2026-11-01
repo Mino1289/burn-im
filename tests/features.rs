@@ -7,6 +7,7 @@
 use burn::module::{Module, ModuleVisitor, Param};
 use burn::prelude::*;
 use burn::tensor::Tensor;
+use burn_im::models::convnext::{ConvNeXt, convnext_tiny};
 use burn_im::models::resnet::{ResNet, resnet18, resnet50};
 use burn_im::traits::{IntermediatesOptions, VisionModel};
 use burn_im::{CreateModelOptions, create_model};
@@ -230,6 +231,51 @@ fn output_stride_keeps_the_shared_stages_unchanged() {
             values(default_features[level].clone()),
             values(dilated_features[level].clone()),
             "level {level} must not depend on the output stride"
+        );
+    }
+}
+
+#[test]
+fn convnext_features_only_matches_full_intermediates() {
+    let device = device();
+    let full = ConvNeXt::new(convnext_tiny(1000), &device);
+    let record = full.into_record().allow_unused(true);
+
+    let expected = ConvNeXt::new(convnext_tiny(1000), &device)
+        .load_record(record.clone())
+        .forward_intermediates(input(&device), &all_levels(2));
+
+    let truncated =
+        ConvNeXt::new(convnext_tiny(0).with_features_only([0, 1]), &device).load_record(record);
+    let actual = truncated.forward_intermediates(input(&device), &IntermediatesOptions::new());
+
+    assert_eq!(truncated.num_classes(), 0);
+    assert_eq!(truncated.feature_info().len(), 2);
+    assert_eq!(actual.len(), expected.len());
+    for (level, (actual, expected)) in actual.into_iter().zip(expected).enumerate() {
+        assert_eq!(actual.dims(), expected.dims());
+        assert_eq!(values(actual), values(expected), "level {level}");
+    }
+}
+
+#[test]
+fn convnext_reports_dilated_reductions() {
+    let device = device();
+
+    for (output_stride, reductions, dims) in [
+        (32, vec![4, 8, 16, 32], [1, 768, 2, 2]),
+        (16, vec![4, 8, 16, 16], [1, 768, 4, 4]),
+        (8, vec![4, 8, 8, 8], [1, 768, 8, 8]),
+    ] {
+        let model = ConvNeXt::new(convnext_tiny(1000).with_output_stride(output_stride), &device);
+        let actual: Vec<usize> = model.feature_info().iter().map(|f| f.reduction).collect();
+        assert_eq!(actual, reductions, "output stride {output_stride}");
+
+        let features = model.forward_intermediates(input(&device), &IntermediatesOptions::new());
+        assert_eq!(
+            features.last().unwrap().dims(),
+            dims,
+            "output stride {output_stride}"
         );
     }
 }

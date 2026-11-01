@@ -10,6 +10,7 @@ use crate::hub::head_filter::{HeadAction, adapt_input_conv, head_action, target_
 use crate::hub::{Hub, loader};
 use crate::models::ModelMeta;
 use crate::models::alexnet::{AlexNet, AlexNetConfig};
+use crate::models::convnext::{ConvNeXt, ConvNeXtConfig};
 use crate::models::resnet::{BlockKind, ResNet, ResNetConfig, StemKind};
 use crate::traits::VisionModel;
 
@@ -146,6 +147,7 @@ pub fn split_model_name_tag(name: &str) -> Result<ModelId> {
 enum Family {
     ResNet(ResNetSpec),
     AlexNet,
+    ConvNeXt(ConvNeXtSpec),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -157,6 +159,32 @@ struct ResNetSpec {
     avg_down: bool,
     groups: usize,
     base_width: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ConvNeXtSpec {
+    depths: [usize; 4],
+    dims: [usize; 4],
+    ls_init_value: Option<f64>,
+    use_grn: bool,
+}
+
+const fn convnext(depths: [usize; 4], dims: [usize; 4]) -> Family {
+    Family::ConvNeXt(ConvNeXtSpec {
+        depths,
+        dims,
+        ls_init_value: Some(1e-6),
+        use_grn: false,
+    })
+}
+
+const fn convnextv2(depths: [usize; 4], dims: [usize; 4]) -> Family {
+    Family::ConvNeXt(ConvNeXtSpec {
+        depths,
+        dims,
+        ls_init_value: None,
+        use_grn: true,
+    })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -450,6 +478,184 @@ static MODELS: &[ModelInfo] = &[
         tags: &[],
         num_features: 4096,
     },
+    // ConvNeXt V1
+    ModelInfo {
+        arch: "convnext_atto",
+        family: convnext([2, 2, 6, 2], [40, 80, 160, 320]),
+        default_tag: Some("d2_in1k"),
+        tags: &["d2_in1k"],
+        num_features: 320,
+    },
+    ModelInfo {
+        arch: "convnext_femto",
+        family: convnext([2, 2, 6, 2], [48, 96, 192, 384]),
+        default_tag: Some("d1_in1k"),
+        tags: &["d1_in1k"],
+        num_features: 384,
+    },
+    ModelInfo {
+        arch: "convnext_pico",
+        family: convnext([2, 2, 6, 2], [64, 128, 256, 512]),
+        default_tag: Some("d1_in1k"),
+        tags: &["d1_in1k"],
+        num_features: 512,
+    },
+    ModelInfo {
+        arch: "convnext_nano",
+        family: convnext([2, 2, 8, 2], [80, 160, 320, 640]),
+        default_tag: Some("d1h_in1k"),
+        tags: &["d1h_in1k", "in12k", "in12k_ft_in1k", "r384_ad_in12k"],
+        num_features: 640,
+    },
+    ModelInfo {
+        arch: "convnext_tiny",
+        family: convnext([3, 3, 9, 3], [96, 192, 384, 768]),
+        default_tag: Some("fb_in22k_ft_in1k"),
+        tags: &[
+            "dinov3_lvd1689m",
+            "eupe_lvd1689m",
+            "fb_in1k",
+            "fb_in22k",
+            "fb_in22k_ft_in1k",
+        ],
+        num_features: 768,
+    },
+    ModelInfo {
+        arch: "convnext_small",
+        family: convnext([3, 3, 27, 3], [96, 192, 384, 768]),
+        default_tag: Some("fb_in22k_ft_in1k"),
+        tags: &[
+            "dinov3_lvd1689m",
+            "eupe_lvd1689m",
+            "fb_in1k",
+            "fb_in22k",
+            "fb_in22k_ft_in1k",
+        ],
+        num_features: 768,
+    },
+    ModelInfo {
+        arch: "convnext_base",
+        family: convnext([3, 3, 27, 3], [128, 256, 512, 1024]),
+        default_tag: Some("fb_in22k_ft_in1k"),
+        tags: &[
+            "clip_laion2b",
+            "clip_laion2b_augreg",
+            "clip_laion2b_augreg_ft_in1k",
+            "clip_laion2b_augreg_ft_in12k",
+            "fb_in1k",
+            "fb_in22k",
+            "fb_in22k_ft_in1k",
+        ],
+        num_features: 1024,
+    },
+    ModelInfo {
+        arch: "convnext_large",
+        family: convnext([3, 3, 27, 3], [192, 384, 768, 1536]),
+        default_tag: Some("fb_in22k_ft_in1k"),
+        tags: &[
+            "dinov3_lvd1689m",
+            "fb_in1k",
+            "fb_in22k",
+            "fb_in22k_ft_in1k",
+        ],
+        num_features: 1536,
+    },
+    ModelInfo {
+        arch: "convnext_xlarge",
+        family: convnext([3, 3, 27, 3], [256, 512, 1024, 2048]),
+        default_tag: Some("fb_in22k_ft_in1k"),
+        tags: &["fb_in22k", "fb_in22k_ft_in1k", "fb_in22k_ft_in1k_384"],
+        num_features: 2048,
+    },
+    // ConvNeXt V2
+    ModelInfo {
+        arch: "convnextv2_atto",
+        family: convnextv2([2, 2, 6, 2], [40, 80, 160, 320]),
+        default_tag: Some("fcmae_ft_in1k"),
+        tags: &["fcmae", "fcmae_ft_in1k"],
+        num_features: 320,
+    },
+    ModelInfo {
+        arch: "convnextv2_femto",
+        family: convnextv2([2, 2, 6, 2], [48, 96, 192, 384]),
+        default_tag: Some("fcmae_ft_in1k"),
+        tags: &["fcmae", "fcmae_ft_in1k"],
+        num_features: 384,
+    },
+    ModelInfo {
+        arch: "convnextv2_pico",
+        family: convnextv2([2, 2, 6, 2], [64, 128, 256, 512]),
+        default_tag: Some("fcmae_ft_in1k"),
+        tags: &["fcmae", "fcmae_ft_in1k"],
+        num_features: 512,
+    },
+    ModelInfo {
+        arch: "convnextv2_nano",
+        family: convnextv2([2, 2, 8, 2], [80, 160, 320, 640]),
+        default_tag: Some("fcmae_ft_in22k_in1k"),
+        tags: &[
+            "fcmae",
+            "fcmae_ft_in1k",
+            "fcmae_ft_in22k_in1k",
+            "fcmae_ft_in22k_in1k_384",
+        ],
+        num_features: 640,
+    },
+    ModelInfo {
+        arch: "convnextv2_tiny",
+        family: convnextv2([3, 3, 9, 3], [96, 192, 384, 768]),
+        default_tag: Some("fcmae_ft_in22k_in1k"),
+        tags: &[
+            "fcmae",
+            "fcmae_ft_in1k",
+            "fcmae_ft_in22k_in1k",
+            "fcmae_ft_in22k_in1k_384",
+        ],
+        num_features: 768,
+    },
+    ModelInfo {
+        arch: "convnextv2_small",
+        family: convnextv2([3, 3, 27, 3], [96, 192, 384, 768]),
+        default_tag: None,
+        tags: &[],
+        num_features: 768,
+    },
+    ModelInfo {
+        arch: "convnextv2_base",
+        family: convnextv2([3, 3, 27, 3], [128, 256, 512, 1024]),
+        default_tag: Some("fcmae_ft_in22k_in1k"),
+        tags: &[
+            "fcmae",
+            "fcmae_ft_in1k",
+            "fcmae_ft_in22k_in1k",
+            "fcmae_ft_in22k_in1k_384",
+        ],
+        num_features: 1024,
+    },
+    ModelInfo {
+        arch: "convnextv2_large",
+        family: convnextv2([3, 3, 27, 3], [192, 384, 768, 1536]),
+        default_tag: Some("fcmae_ft_in22k_in1k"),
+        tags: &[
+            "fcmae",
+            "fcmae_ft_in1k",
+            "fcmae_ft_in22k_in1k",
+            "fcmae_ft_in22k_in1k_384",
+        ],
+        num_features: 1536,
+    },
+    ModelInfo {
+        arch: "convnextv2_huge",
+        family: convnextv2([3, 3, 27, 3], [352, 704, 1408, 2816]),
+        default_tag: Some("fcmae_ft_in1k"),
+        tags: &[
+            "fcmae",
+            "fcmae_ft_in1k",
+            "fcmae_ft_in22k_in1k_384",
+            "fcmae_ft_in22k_in1k_512",
+        ],
+        num_features: 2816,
+    },
 ];
 
 fn find(arch: &str) -> Option<&'static ModelInfo> {
@@ -615,7 +821,7 @@ pub fn create_model(
                     .to_string(),
             ));
         }
-        if !matches!(info.family, Family::ResNet(_)) {
+        if !matches!(info.family, Family::ResNet(_) | Family::ConvNeXt(_)) {
             return Err(Error::InvalidConfiguration(format!(
                 "`features_only` is not supported by architecture `{}`",
                 id.arch
@@ -629,7 +835,7 @@ pub fn create_model(
 
     // Families that cannot fold their stride into dilation must say so instead of ignoring the
     // option; `output_stride = 32` is their nominal reduction, so it remains accepted.
-    if !matches!(info.family, Family::ResNet(_))
+    if !matches!(info.family, Family::ResNet(_) | Family::ConvNeXt(_))
         && let Some(output_stride) = options.output_stride.filter(|stride| *stride != 32)
     {
         return Err(Error::InvalidConfiguration(format!(
@@ -690,6 +896,45 @@ pub fn create_model(
             });
             Box::new(alexnet)
         }
+        Family::ConvNeXt(spec) => {
+            let mut config = ConvNeXtConfig::new(spec.depths, spec.dims)
+                .with_num_classes(num_classes)
+                .with_in_chans(in_chans);
+            if let Some(ls_init_value) = spec.ls_init_value {
+                config = config.with_ls_init_value(Some(ls_init_value));
+            } else {
+                config = config.with_ls_init_value(None);
+            }
+            if spec.use_grn {
+                config = config.with_grn(true);
+            }
+            if let Some(drop_rate) = options.drop_rate {
+                config = config.with_drop_rate(drop_rate);
+            }
+            if let Some(drop_path_rate) = options.drop_path_rate {
+                config = config.with_drop_path_rate(drop_path_rate);
+            }
+            if let Some(output_stride) = options.output_stride {
+                config = config.with_output_stride(output_stride);
+            }
+            if options.features_only {
+                config = config
+                    .with_features_only(options.out_indices.clone().unwrap_or_else(|| vec![3]));
+            }
+            config.validate()?;
+
+            let mut convnext = ConvNeXt::new(config, device);
+            let feature_info = convnext.feature_info().to_vec();
+            let num_features = convnext.num_features();
+            convnext.set_meta(ModelMeta {
+                name: id.name.clone(),
+                num_classes,
+                num_features,
+                feature_info,
+                pretrained_cfg: pretrained_cfg.clone(),
+            });
+            Box::new(convnext)
+        }
     };
 
     if let Some(path) = &options.checkpoint_path {
@@ -730,6 +975,7 @@ fn load_into(
             ResNet::key_remaps(&config)
         }
         Family::AlexNet => AlexNet::key_remaps(),
+        Family::ConvNeXt(_) => ConvNeXt::key_remaps(),
     };
 
     // `load_safetensors` is generic over `Module`, so dispatch on the concrete family.
@@ -758,6 +1004,18 @@ fn load_into(
             }
             check_report(&report, head, in_chans, name)
         }
+        Family::ConvNeXt(_) => {
+            let model = model
+                .as_any_mut()
+                .downcast_mut::<ConvNeXt>()
+                .ok_or_else(|| Error::WeightLoadError("unexpected model type".to_string()))?;
+            let report = loader::load_safetensors(model, path, &remaps)?;
+            if in_chans != 3 {
+                let weight = loader::read_tensor::<4>(path, first_conv_key(info.family), device)?;
+                model.set_first_conv_weight(adapt_input_conv(weight, in_chans));
+            }
+            check_report(&report, head, in_chans, name)
+        }
     }
 }
 
@@ -767,6 +1025,7 @@ fn first_conv_key(family: Family) -> &'static str {
         Family::ResNet(spec) if spec.stem == StemKind::Deep => "conv1.0.weight",
         Family::ResNet(_) => "conv1.weight",
         Family::AlexNet => "features.0.weight",
+        Family::ConvNeXt(_) => "stem.0.weight",
     }
 }
 
@@ -784,7 +1043,12 @@ fn check_report(
     };
     // With a non-default `in_chans` the first convolution is adapted after loading and its
     // 3-channel checkpoint tensor is expected to mismatch.
-    let conv_error = |message: &str| in_chans != 3 && message.contains("conv1");
+    let conv_error = |message: &str| {
+        in_chans != 3
+            && (message.contains("conv1")
+                || message.contains("stem.conv")
+                || message.contains("stem.0"))
+    };
 
     let unexpected: Vec<&String> = report
         .errors

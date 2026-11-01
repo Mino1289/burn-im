@@ -25,3 +25,6 @@ rustc-ice-*.txt
 
 Cargo.lock
 plan.md
+.venv/
+.base-ast/
+examples/data/

@@ -1,6 +1,7 @@
 //! Model families.
 
 pub mod alexnet;
+pub mod convnext;
 pub mod resnet;
 
 use crate::hub::config::PretrainedCfg;
