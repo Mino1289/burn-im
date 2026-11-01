@@ -34,3 +34,9 @@ burn = { version = "0.22.1", default-features = false, features = ["std", "flex"
 name = "classify"
 path = "examples/classify.rs"
 required-features = ["image"]
+
+[[example]]
+name = "resnet50"
+path = "examples/resnet50.rs"
+required-features = ["image"]
+

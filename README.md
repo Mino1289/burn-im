@@ -112,10 +112,14 @@ let features = model.forward_intermediates(
 
 ### Classify an image
 
-With the `image` feature, the bundled example preprocesses a JPEG/PNG with the checkpoint's own
-`PretrainedCfg` and prints the top-k ImageNet labels (weights download on first run):
+With the `image` feature, bundled examples preprocess a JPEG/PNG with the checkpoint's own
+`PretrainedCfg` and print top ImageNet labels (weights download on first run):
 
 ```bash
+# Basic ResNet-50 inference (defaults to an image in examples/data/):
+cargo run --release --example resnet50 --features image
+
+# Or specify a model and image via the CLI:
 cargo run --release --example classify --features image -- path/to/image.jpg --model resnet50.a1_in1k --top 5
 ```
 
