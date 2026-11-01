@@ -89,6 +89,12 @@ fn global_response_norm_matches_reference() {
             }
         }
     }
+
+    // Channels-last variant: permute [B, C, H, W] to [B, H, W, C], run forward_channels_last,
+    // and verify it matches the permuted NCHW output.
+    let input_nhwc = Tensor::from_data(TensorData::from(input), &device).permute([0, 2, 3, 1]);
+    let output_nhwc = grn.forward_channels_last(input_nhwc).permute([0, 3, 1, 2]);
+    assert_close(&values(output_nhwc), &output, 1e-6);
 }
 
 #[test]

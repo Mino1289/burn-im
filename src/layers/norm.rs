@@ -71,4 +71,14 @@ impl GlobalResponseNorm {
             + self.beta.val().reshape([1, channels, 1, 1])
             + self.gamma.val().reshape([1, channels, 1, 1]) * input * response
     }
+
+    /// Applies GRN to `[B, H, W, C]` (channels-last layout, as used inside ConvNeXt-V2 blocks).
+    pub fn forward_channels_last(&self, input: Tensor<4>) -> Tensor<4> {
+        let channels = input.dims()[3];
+        let norm = input.clone().square().sum_dim(1).sum_dim(2).sqrt();
+        let response = norm.clone() / norm.mean_dim(3).add_scalar(Self::EPS);
+        input.clone()
+            + self.beta.val().reshape([1, 1, 1, channels])
+            + self.gamma.val().reshape([1, 1, 1, channels]) * input * response
+    }
 }
