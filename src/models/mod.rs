@@ -3,6 +3,7 @@
 pub mod alexnet;
 pub mod convnext;
 pub mod resnet;
+pub mod vit;
 
 use crate::hub::config::PretrainedCfg;
 use crate::traits::FeatureInfo;

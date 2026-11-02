@@ -12,6 +12,7 @@ use crate::models::ModelMeta;
 use crate::models::alexnet::{AlexNet, AlexNetConfig};
 use crate::models::convnext::{ConvNeXt, ConvNeXtConfig};
 use crate::models::resnet::{BlockKind, ResNet, ResNetConfig, StemKind};
+use crate::models::vit::{ViTConfig, ViTPoolMode, VisionTransformer};
 use crate::traits::VisionModel;
 
 /// Options for [`create_model`].
@@ -148,6 +149,50 @@ enum Family {
     ResNet(ResNetSpec),
     AlexNet,
     ConvNeXt(ConvNeXtSpec),
+    ViT(ViTSpec),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ViTSpec {
+    img_size: usize,
+    patch_size: usize,
+    embed_dim: usize,
+    depth: usize,
+    num_heads: usize,
+    mlp_ratio: f64,
+    qkv_bias: bool,
+    qk_norm: bool,
+    init_values: Option<f64>,
+    class_token: bool,
+    no_embed_class: bool,
+    reg_tokens: usize,
+    use_rope: bool,
+    pool_mode: ViTPoolMode,
+}
+
+const fn vit(
+    img_size: usize,
+    patch_size: usize,
+    embed_dim: usize,
+    depth: usize,
+    num_heads: usize,
+) -> Family {
+    Family::ViT(ViTSpec {
+        img_size,
+        patch_size,
+        embed_dim,
+        depth,
+        num_heads,
+        mlp_ratio: 4.0,
+        qkv_bias: true,
+        qk_norm: false,
+        init_values: None,
+        class_token: true,
+        no_embed_class: false,
+        reg_tokens: 0,
+        use_rope: false,
+        pool_mode: ViTPoolMode::Token,
+    })
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -653,6 +698,93 @@ static MODELS: &[ModelInfo] = &[
         ],
         num_features: 2816,
     },
+    // Vision Transformer (ViT)
+    ModelInfo {
+        arch: "vit_tiny_patch16_224",
+        family: vit(224, 16, 192, 12, 3),
+        default_tag: Some("augreg_in21k_ft_in1k"),
+        tags: &["augreg_in21k_ft_in1k", "augreg_in1k"],
+        num_features: 192,
+    },
+    ModelInfo {
+        arch: "vit_small_patch16_224",
+        family: vit(224, 16, 384, 12, 6),
+        default_tag: Some("augreg_in21k_ft_in1k"),
+        tags: &["augreg_in21k_ft_in1k", "augreg_in1k", "dino"],
+        num_features: 384,
+    },
+    ModelInfo {
+        arch: "vit_base_patch16_224",
+        family: vit(224, 16, 768, 12, 12),
+        default_tag: Some("augreg2_in21k_ft_in1k"),
+        tags: &[
+            "augreg2_in21k_ft_in1k",
+            "augreg_in21k_ft_in1k",
+            "augreg_in1k",
+            "orig_in21k_ft_in1k",
+            "dino",
+            "dino3",
+        ],
+        num_features: 768,
+    },
+    ModelInfo {
+        arch: "vit_large_patch16_224",
+        family: vit(224, 16, 1024, 24, 16),
+        default_tag: Some("augreg_in21k_ft_in1k"),
+        tags: &["augreg_in21k_ft_in1k", "augreg_in1k"],
+        num_features: 1024,
+    },
+    ModelInfo {
+        arch: "deit_base_patch16_224",
+        family: vit(224, 16, 768, 12, 12),
+        default_tag: Some("b3_in1k"),
+        tags: &["b3_in1k", "fb_in1k"],
+        num_features: 768,
+    },
+    ModelInfo {
+        arch: "vit_small_patch14_dinov2",
+        family: Family::ViT(ViTSpec {
+            img_size: 518,
+            patch_size: 14,
+            embed_dim: 384,
+            depth: 12,
+            num_heads: 6,
+            mlp_ratio: 4.0,
+            qkv_bias: true,
+            qk_norm: false,
+            init_values: Some(1e-5),
+            class_token: true,
+            no_embed_class: false,
+            reg_tokens: 0,
+            use_rope: false,
+            pool_mode: ViTPoolMode::Token,
+        }),
+        default_tag: Some("lvd142m"),
+        tags: &["lvd142m"],
+        num_features: 384,
+    },
+    ModelInfo {
+        arch: "vit_base_patch16_siglip_224",
+        family: Family::ViT(ViTSpec {
+            img_size: 224,
+            patch_size: 16,
+            embed_dim: 768,
+            depth: 12,
+            num_heads: 12,
+            mlp_ratio: 4.0,
+            qkv_bias: true,
+            qk_norm: false,
+            init_values: None,
+            class_token: false,
+            no_embed_class: false,
+            reg_tokens: 0,
+            use_rope: false,
+            pool_mode: ViTPoolMode::Map,
+        }),
+        default_tag: Some("v2_webli"),
+        tags: &["v2_webli", "webli"],
+        num_features: 768,
+    },
 ];
 
 fn find(arch: &str) -> Option<&'static ModelInfo> {
@@ -818,7 +950,10 @@ pub fn create_model(
                     .to_string(),
             ));
         }
-        if !matches!(info.family, Family::ResNet(_) | Family::ConvNeXt(_)) {
+        if !matches!(
+            info.family,
+            Family::ResNet(_) | Family::ConvNeXt(_) | Family::ViT(_)
+        ) {
             return Err(Error::InvalidConfiguration(format!(
                 "`features_only` is not supported by architecture `{}`",
                 id.arch
@@ -932,6 +1067,50 @@ pub fn create_model(
             });
             Box::new(convnext)
         }
+        Family::ViT(spec) => {
+            let mut config = ViTConfig::new(spec.embed_dim, spec.depth, spec.num_heads)
+                .with_img_size((spec.img_size, spec.img_size))
+                .with_patch_size((spec.patch_size, spec.patch_size))
+                .with_num_classes(num_classes)
+                .with_in_chans(in_chans)
+                .with_mlp_ratio(spec.mlp_ratio)
+                .with_no_embed_class(spec.no_embed_class)
+                .with_qkv_bias(spec.qkv_bias)
+                .with_qk_norm(spec.qk_norm)
+                .with_init_values(spec.init_values)
+                .with_class_token(spec.class_token)
+                .with_reg_tokens(spec.reg_tokens)
+                .with_pool_mode(spec.pool_mode);
+            if id.tag.as_deref() == Some("dino3") {
+                config = config.with_use_rope(true);
+            } else {
+                config = config.with_use_rope(spec.use_rope);
+            }
+            if let Some(drop_path_rate) = options.drop_path_rate {
+                config = config.with_drop_path_rate(drop_path_rate);
+            }
+            if options.features_only {
+                config = config.with_features_only(
+                    options
+                        .out_indices
+                        .clone()
+                        .unwrap_or_else(|| vec![spec.depth - 1]),
+                );
+            }
+            config.validate()?;
+
+            let mut vit = VisionTransformer::new(config, device);
+            let feature_info = vit.feature_info().to_vec();
+            let num_features = vit.num_features();
+            vit.set_meta(ModelMeta {
+                name: id.name.clone(),
+                num_classes,
+                num_features,
+                feature_info,
+                pretrained_cfg: pretrained_cfg.clone(),
+            });
+            Box::new(vit)
+        }
     };
 
     if let Some(path) = &options.checkpoint_path {
@@ -973,6 +1152,7 @@ fn load_into(
         }
         Family::AlexNet => AlexNet::key_remaps(),
         Family::ConvNeXt(_) => ConvNeXt::key_remaps(),
+        Family::ViT(_) => VisionTransformer::key_remaps(),
     };
 
     // `load_safetensors` is generic over `Module`, so dispatch on the concrete family.
@@ -1013,6 +1193,18 @@ fn load_into(
             }
             check_report(&report, head, in_chans, name)
         }
+        Family::ViT(_) => {
+            let model = model
+                .as_any_mut()
+                .downcast_mut::<VisionTransformer>()
+                .ok_or_else(|| Error::WeightLoadError("unexpected model type".to_string()))?;
+            let report = loader::load_safetensors(model, path, &remaps)?;
+            if in_chans != 3 {
+                let weight = loader::read_tensor::<4>(path, first_conv_key(info.family), device)?;
+                model.set_first_conv_weight(adapt_input_conv(weight, in_chans));
+            }
+            check_report(&report, head, in_chans, name)
+        }
     }
 }
 
@@ -1023,6 +1215,7 @@ fn first_conv_key(family: Family) -> &'static str {
         Family::ResNet(_) => "conv1.weight",
         Family::AlexNet => "features.0.weight",
         Family::ConvNeXt(_) => "stem.0.weight",
+        Family::ViT(_) => "patch_embed.proj.weight",
     }
 }
 

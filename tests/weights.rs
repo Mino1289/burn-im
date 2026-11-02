@@ -247,3 +247,68 @@ fn one_channel_pretrained_convnext_tiny() {
     let out = model.forward(Tensor::zeros([1, 1, 64, 64], &device()));
     assert_eq!(out.dims(), [1, 1000]);
 }
+
+#[test]
+#[ignore = "downloads weights from the Hugging Face Hub"]
+fn loads_vit_base_patch16_224_and_runs_inference() {
+    let options = burn_im::CreateModelOptions::pretrained();
+    let model = burn_im::create_model(
+        "vit_base_patch16_224.augreg2_in21k_ft_in1k",
+        &options,
+        &device(),
+    )
+    .unwrap();
+    assert_eq!(model.num_classes(), 1000);
+    assert_eq!(model.num_features(), 768);
+
+    let logits = model.forward(Tensor::zeros([1, 3, 224, 224], &device()));
+    assert_eq!(logits.dims(), [1, 1000]);
+    assert!(
+        logits
+            .into_data()
+            .as_slice::<f32>()
+            .unwrap()
+            .iter()
+            .all(|v| v.is_finite())
+    );
+}
+
+#[test]
+#[ignore = "downloads weights from the Hugging Face Hub"]
+fn loads_vit_small_patch14_dinov2_and_runs_inference() {
+    let options = burn_im::CreateModelOptions::pretrained();
+    let model =
+        burn_im::create_model("vit_small_patch14_dinov2.lvd142m", &options, &device()).unwrap();
+    assert_eq!(model.num_features(), 384);
+
+    let logits = model.forward(Tensor::zeros([1, 3, 518, 518], &device()));
+    assert_eq!(logits.dims(), [1, 384]);
+    assert!(
+        logits
+            .into_data()
+            .as_slice::<f32>()
+            .unwrap()
+            .iter()
+            .all(|v| v.is_finite())
+    );
+}
+
+#[test]
+#[ignore = "downloads weights from the Hugging Face Hub"]
+fn loads_vit_base_patch16_siglip_224_and_runs_inference() {
+    let options = burn_im::CreateModelOptions::pretrained();
+    let model =
+        burn_im::create_model("vit_base_patch16_siglip_224.v2_webli", &options, &device()).unwrap();
+    assert_eq!(model.num_features(), 768);
+
+    let logits = model.forward(Tensor::zeros([1, 3, 224, 224], &device()));
+    assert_eq!(logits.dims(), [1, 768]);
+    assert!(
+        logits
+            .into_data()
+            .as_slice::<f32>()
+            .unwrap()
+            .iter()
+            .all(|v| v.is_finite())
+    );
+}

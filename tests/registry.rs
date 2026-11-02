@@ -44,7 +44,7 @@ fn lists_and_finds_models() {
     assert!(is_model("resnet50.a1_in1k"));
     assert!(is_model("hf-hub:timm/resnet50.a1_in1k"));
     assert!(is_model("convnext_tiny"));
-    assert!(!is_model("vit_base_patch16_224"));
+    assert!(is_model("vit_base_patch16_224"));
 
     let pairs = list_pretrained(Some("*resnet50d*"));
     assert!(pairs.contains(&"resnet50d.ra2_in1k".to_string()));
@@ -185,4 +185,39 @@ fn creates_convnext_output_stride() {
     assert_eq!(model.feature_info()[3].reduction, 8);
     let feats = model.forward_features(Tensor::zeros([1, 3, 64, 64], &device()));
     assert_eq!(feats.dims(), [1, 768, 8, 8]);
+}
+
+#[test]
+fn creates_vit_from_registry() {
+    let model = create_model(
+        "vit_base_patch16_224",
+        &CreateModelOptions::default(),
+        &device(),
+    )
+    .unwrap();
+    assert_eq!(model.num_classes(), 1000);
+    assert_eq!(model.num_features(), 768);
+    assert_eq!(model.feature_info().len(), 12);
+    assert_eq!(model.model_name(), "vit_base_patch16_224");
+
+    let logits = model.forward(Tensor::zeros([1, 3, 224, 224], &device()));
+    assert_eq!(logits.dims(), [1, 1000]);
+}
+
+#[test]
+fn vit_rope_has_no_pos_embed() {
+    let mut model = create_model(
+        "vit_base_patch16_224.dino3",
+        &CreateModelOptions::default(),
+        &device(),
+    )
+    .unwrap();
+    let vit = model
+        .as_any_mut()
+        .downcast_mut::<burn_im::models::vit::VisionTransformer>()
+        .unwrap();
+    assert!(
+        vit.pos_embed.is_none(),
+        "RoPE models must not carry pos_embed parameters"
+    );
 }

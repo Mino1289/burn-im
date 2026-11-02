@@ -59,15 +59,27 @@ fn assert_close(actual: &[f32], expected: &[f32], what: &str) -> f32 {
     let mut max_elem_err = 0.0_f32;
     let mut diff_sq = 0.0_f64;
     let mut expected_sq = 0.0_f64;
-    for (a, b) in actual.iter().zip(expected) {
+    let mut worst_idx = 0;
+    let mut worst_actual = 0.0f32;
+    let mut worst_expected = 0.0f32;
+    for (i, (a, b)) in actual.iter().zip(expected).enumerate() {
         let diff = (a - b).abs();
         max_abs = max_abs.max(diff);
         let elem_err = diff / b.abs().max(1.0);
-        max_elem_err = max_elem_err.max(elem_err);
+        if elem_err > max_elem_err {
+            max_elem_err = elem_err;
+            worst_idx = i;
+            worst_actual = *a;
+            worst_expected = *b;
+        }
         diff_sq += (diff as f64).powi(2);
         expected_sq += (*b as f64).powi(2);
     }
     let l2_rel = (diff_sq / expected_sq.max(f64::MIN_POSITIVE)).sqrt();
+
+    println!(
+        "{what}: rel L2 {l2_rel:.3e}, max elem err {max_elem_err:.3e} at idx {worst_idx} (actual={worst_actual}, expected={worst_expected}), max abs {max_abs:.3e}"
+    );
 
     assert!(
         l2_rel < TOLERANCE,
@@ -268,4 +280,10 @@ fn convnextv2_tiny_matches_timm() {
 #[ignore = "downloads pretrained weights from the Hugging Face Hub"]
 fn convnext_tiny_output_stride_matches_timm() {
     check_output_stride("convnext_tiny", "fb_in22k_ft_in1k", 16);
+}
+
+#[test]
+#[ignore = "downloads pretrained weights from the Hugging Face Hub"]
+fn vit_base_patch16_224_matches_timm() {
+    check("vit_base_patch16_224", "augreg2_in21k_ft_in1k");
 }

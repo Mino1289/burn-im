@@ -24,6 +24,7 @@ MODELS = {
     "resnext50_32x4d": "a1h_in1k",
     "convnext_tiny": "fb_in22k_ft_in1k",
     "convnextv2_tiny": "fcmae_ft_in22k_in1k",
+    "vit_base_patch16_224": "augreg2_in21k_ft_in1k",
 }
 
 # Dilated variants: `output_stride` below 32 folds the stride of the last stages into the
@@ -38,19 +39,27 @@ OUTPUT_STRIDES = {
 
 def generate(arch: str, tag: str) -> None:
     torch.manual_seed(0)
-    x = torch.randn(1, 3, 64, 64)
+    resolution = 224 if "vit" in arch or "deit" in arch else 64
+    x = torch.randn(1, 3, resolution, resolution)
 
     model = timm.create_model(f"{arch}.{tag}", pretrained=True).eval()
+    for b in getattr(model, "blocks", []):
+        if hasattr(b, "attn") and hasattr(b.attn, "fused_attn"):
+            b.attn.fused_attn = False
     with torch.no_grad():
         logits = model(x)
         pre_logits = model.forward_head(model.forward_features(x), pre_logits=True)
         final, intermediates = model.forward_intermediates(
             x,
             indices=tuple(range(len(model.feature_info))),
+            norm=True,
             stop_early=False,
             output_fmt="NCHW",
             intermediates_only=False,
         )
+
+    if final.ndim == 3:
+        final = final.unsqueeze(1)
 
     tensors = {
         "input": x.contiguous(),
@@ -89,6 +98,7 @@ def generate_output_stride(arch: str, tag: str, output_stride: int) -> None:
         final, intermediates = model.forward_intermediates(
             x,
             indices=tuple(range(len(model.feature_info))),
+            norm=True,
             stop_early=False,
             output_fmt="NCHW",
             intermediates_only=False,
