@@ -14,12 +14,76 @@ It provides idiomatic implementations of modern vision backbones, native loading
 
 ## Supported models
 
-| Family  | Architectures                                                                                      |
-| ------- | -------------------------------------------------------------------------------------------------- |
-| ResNet  | `resnet18`, `resnet34`, `resnet50`, `resnet101`, `resnet152`                                        |
-| ResNet-D| `resnet18d`, `resnet34d`, `resnet50d`, `resnet101d`, `resnet152d`                                    |
-| ResNeXt | `resnext50_32x4d`, `resnext101_32x8d`, `wide_resnet50_2`, `wide_resnet101_2`                        |
-| AlexNet | `alexnet` (architecture only — no `timm` 1.0 checkpoint; torchvision weights can be loaded locally)  |
+`burn-im` includes **40 architectures** across **7 families** and supports **150+ pretrained checkpoint configurations** directly downloadable from the Hugging Face Hub (or loaded locally from `.safetensors`).
+
+| Family | Architectures | Default Tag | Checkpoint Recipes & Pretrained Weights |
+| ------ | ------------- | ----------- | --------------------------------------- |
+| **ResNet** | `resnet18`, `resnet34`, `resnet50`, `resnet101`, `resnet152` | `a1_in1k` | `a1_in1k`, `a2_in1k`, `a3_in1k`, `tv_in1k`, `tv2_in1k`, `gluon_in1k`, `fb_ssl_*`, `fb_swsl_*`, `am_in1k`, `ra_in1k`, `bt_in1k` |
+| **ResNet-D** | `resnet18d`, `resnet34d`, `resnet50d`, `resnet101d`, `resnet152d` | `ra2_in1k` | `ra2_in1k`, `ra4_e3600_r224_in1k`, `a1_in1k`, `a2_in1k`, `a3_in1k`, `gluon_in1k` |
+| **ResNeXt & Wide ResNet** | `resnext50_32x4d`, `resnext101_32x8d`, `wide_resnet50_2`, `wide_resnet101_2` | `a1h_in1k` / `tv_in1k` | `a1h_in1k`, `a1_in1k`, `a2_in1k`, `a3_in1k`, `tv_in1k`, `tv2_in1k`, `gluon_in1k`, `fb_ssl_*`, `fb_swsl_*`, `fb_wsl_*`, `racm_in1k` |
+| **ConvNeXt** | `convnext_atto`, `convnext_femto`, `convnext_pico`, `convnext_nano`, `convnext_tiny`, `convnext_small`, `convnext_base`, `convnext_large`, `convnext_xlarge` | `fb_in22k_ft_in1k` / `d1_in1k` / `d2_in1k` / `d1h_in1k` | `fb_in22k_ft_in1k`, `fb_in1k`, `fb_in22k`, `d1_in1k`, `d2_in1k`, `d1h_in1k`, `in12k`, `dinov3_lvd1689m`, `eupe_lvd1689m`, `clip_laion2b*` |
+| **ConvNeXt-V2** | `convnextv2_atto`, `convnextv2_femto`, `convnextv2_pico`, `convnextv2_nano`, `convnextv2_tiny`, `convnextv2_small`, `convnextv2_base`, `convnextv2_large`, `convnextv2_huge` | `fcmae_ft_in22k_in1k` / `fcmae_ft_in1k` | `fcmae_ft_in22k_in1k`, `fcmae_ft_in1k`, `fcmae` (pretrain), 384/512 resolutions (`convnextv2_small` is architecture only) |
+| **Vision Transformer (ViT)** | `vit_tiny_patch16_224`, `vit_small_patch16_224`, `vit_base_patch16_224`, `vit_large_patch16_224` | `augreg2_in21k_ft_in1k` (base), `augreg_in21k_ft_in1k` | `augreg2_in21k_ft_in1k`, `augreg_in21k_ft_in1k`, `augreg_in1k`, `orig_in21k_ft_in1k`, `dino`, `dino3` |
+| **DeiT-III** | `deit_base_patch16_224` | `b3_in1k` | `b3_in1k`, `fb_in1k` |
+| **DINOv2** | `vit_small_patch14_dinov2` | `lvd142m` | `lvd142m` (self-supervised foundation representation) |
+| **SigLIP** | `vit_base_patch16_siglip_224` | `v2_webli` | `v2_webli`, `webli` (multimodal vision encoder) |
+| **AlexNet** | `alexnet` | — | Architecture only (torchvision `.safetensors` can be loaded locally via `with_checkpoint`) |
+
+<details>
+<summary><strong>View all available pretrained checkpoints by architecture</strong></summary>
+
+### ResNet
+- `resnet18`: `a1_in1k` (default), `a2_in1k`, `a3_in1k`, `fb_ssl_yfcc100m_ft_in1k`, `fb_swsl_ig1b_ft_in1k`, `gluon_in1k`, `tv_in1k`
+- `resnet34`: `a1_in1k` (default), `a2_in1k`, `a3_in1k`, `bt_in1k`, `gluon_in1k`, `ra4_e3600_r224_in1k`, `tv_in1k`
+- `resnet50`: `a1_in1k` (default), `a1h_in1k`, `a2_in1k`, `a3_in1k`, `am_in1k`, `b1k_in1k`, `b2k_in1k`, `bt_in1k`, `c1_in1k`, `c2_in1k`, `d_in1k`, `fb_ssl_yfcc100m_ft_in1k`, `fb_swsl_ig1b_ft_in1k`, `gluon_in1k`, `ra_in1k`, `ram_in1k`, `tv2_in1k`, `tv_in1k`
+- `resnet101`: `a1_in1k` (default), `a1h_in1k`, `a2_in1k`, `a3_in1k`, `gluon_in1k`, `tv2_in1k`, `tv_in1k`
+- `resnet152`: `a1_in1k` (default), `a1h_in1k`, `a2_in1k`, `a3_in1k`, `gluon_in1k`, `tv2_in1k`, `tv_in1k`
+
+### ResNet-D
+- `resnet18d`: `ra2_in1k` (default), `ra4_e3600_r224_in1k`
+- `resnet34d`: `ra2_in1k` (default)
+- `resnet50d`: `ra2_in1k` (default), `a1_in1k`, `a2_in1k`, `a3_in1k`, `gluon_in1k`, `ra4_e3600_r224_in1k`
+- `resnet101d`: `ra2_in1k` (default), `gluon_in1k`
+- `resnet152d`: `ra2_in1k` (default), `gluon_in1k`
+
+### ResNeXt & Wide ResNet
+- `resnext50_32x4d`: `a1h_in1k` (default), `a1_in1k`, `a2_in1k`, `a3_in1k`, `gluon_in1k`, `ra_in1k`, `tv2_in1k`, `tv_in1k`
+- `resnext101_32x8d`: `tv_in1k` (default), `fb_ssl_yfcc100m_ft_in1k`, `fb_swsl_ig1b_ft_in1k`, `fb_wsl_ig1b_ft_in1k`, `tv2_in1k`
+- `wide_resnet50_2`: `tv_in1k` (default), `racm_in1k`, `tv2_in1k`
+- `wide_resnet101_2`: `tv_in1k` (default), `tv2_in1k`
+
+### ConvNeXt (V1)
+- `convnext_atto`: `d2_in1k` (default)
+- `convnext_femto`: `d1_in1k` (default)
+- `convnext_pico`: `d1_in1k` (default)
+- `convnext_nano`: `d1h_in1k` (default), `in12k`, `in12k_ft_in1k`, `r384_ad_in12k`
+- `convnext_tiny`: `fb_in22k_ft_in1k` (default), `dinov3_lvd1689m`, `eupe_lvd1689m`, `fb_in1k`, `fb_in22k`
+- `convnext_small`: `fb_in22k_ft_in1k` (default), `dinov3_lvd1689m`, `eupe_lvd1689m`, `fb_in1k`, `fb_in22k`
+- `convnext_base`: `fb_in22k_ft_in1k` (default), `clip_laion2b`, `clip_laion2b_augreg`, `clip_laion2b_augreg_ft_in1k`, `clip_laion2b_augreg_ft_in12k`, `dinov3_lvd1689m`, `eupe_lvd1689m`, `fb_in1k`, `fb_in22k`
+- `convnext_large`: `fb_in22k_ft_in1k` (default), `dinov3_lvd1689m`, `fb_in1k`, `fb_in22k`
+- `convnext_xlarge`: `fb_in22k_ft_in1k` (default), `fb_in22k`, `fb_in22k_ft_in1k_384`
+
+### ConvNeXt-V2
+- `convnextv2_atto`: `fcmae_ft_in1k` (default), `fcmae`
+- `convnextv2_femto`: `fcmae_ft_in1k` (default), `fcmae`
+- `convnextv2_pico`: `fcmae_ft_in1k` (default), `fcmae`
+- `convnextv2_nano`: `fcmae_ft_in22k_in1k` (default), `fcmae`, `fcmae_ft_in1k`, `fcmae_ft_in22k_in1k_384`
+- `convnextv2_tiny`: `fcmae_ft_in22k_in1k` (default), `fcmae`, `fcmae_ft_in1k`, `fcmae_ft_in22k_in1k_384`
+- `convnextv2_small`: *(architecture only)*
+- `convnextv2_base`: `fcmae_ft_in22k_in1k` (default), `fcmae`, `fcmae_ft_in1k`, `fcmae_ft_in22k_in1k_384`
+- `convnextv2_large`: `fcmae_ft_in22k_in1k` (default), `fcmae`, `fcmae_ft_in1k`, `fcmae_ft_in22k_in1k_384`
+- `convnextv2_huge`: `fcmae_ft_in1k` (default), `fcmae`, `fcmae_ft_in22k_in1k_384`, `fcmae_ft_in22k_in1k_512`
+
+### Vision Transformer (ViT, DeiT-III, DINOv2, SigLIP)
+- `vit_tiny_patch16_224`: `augreg_in21k_ft_in1k` (default), `augreg_in1k`
+- `vit_small_patch16_224`: `augreg_in21k_ft_in1k` (default), `augreg_in1k`, `dino`
+- `vit_base_patch16_224`: `augreg2_in21k_ft_in1k` (default), `augreg_in21k_ft_in1k`, `augreg_in1k`, `orig_in21k_ft_in1k`, `dino`, `dino3`
+- `vit_large_patch16_224`: `augreg_in21k_ft_in1k` (default), `augreg_in1k`
+- `deit_base_patch16_224`: `b3_in1k` (default), `fb_in1k`
+- `vit_small_patch14_dinov2`: `lvd142m` (default)
+- `vit_base_patch16_siglip_224`: `v2_webli` (default), `webli`
+
+</details>
 
 Use `list_models` / `list_pretrained` to query the registry at runtime:
 
@@ -232,8 +296,8 @@ and parity-test workflow.
 - [x] `forward_intermediates` + `FeatureInfo` (timm 1.0 semantics)
 - [x] Non-RGB input adaptation, classifier replacement, headless models
 - [x] ConvNeXt and ConvNeXt-V2 families
+- [x] Vision Transformer (ViT) and `Nlc` feature format
 - [ ] SE-ResNet and EfficientNet families
-- [ ] Vision Transformer (ViT) and `Nlc` feature format
 
 ## License
 
