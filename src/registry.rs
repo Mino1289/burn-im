@@ -542,6 +542,8 @@ static MODELS: &[ModelInfo] = &[
             "clip_laion2b_augreg",
             "clip_laion2b_augreg_ft_in1k",
             "clip_laion2b_augreg_ft_in12k",
+            "dinov3_lvd1689m",
+            "eupe_lvd1689m",
             "fb_in1k",
             "fb_in22k",
             "fb_in22k_ft_in1k",
