@@ -165,6 +165,8 @@ against reference `timm`/`torchvision` outputs on deterministic inputs:
 | `resnext50_32x4d.a1h_in1k`| `9.7e-5`                    |
 | `alexnet` (torchvision)   | `5.5e-5`                    |
 | `resnet18` `in_chans=1`   | `1.2e-5`                    |
+| `convnext_tiny.fb_in22k_ft_in1k`   | `8.0e-5` (features), `1.2e-5` (logits) |
+| `convnextv2_tiny.fcmae_ft_in22k_in1k` | `5.5e-6` (logits) |
 
 Tolerance: **`1e-5` relative L2** for every compared tensor, plus an elementwise
 `1e-4` ceiling so a single outlier cannot hide behind the norm. The elementwise value is

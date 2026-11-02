@@ -22,7 +22,8 @@ use burn_im::{CreateModelOptions, create_model};
 const TOLERANCE: f64 = 1e-5;
 
 /// Elementwise ceiling, so a single outlier cannot hide behind the norm.
-/// This is the f32 noise floor, not an algorithmic allowance.
+/// Scaled relative to `max(1.0, |expected|)` to account for the f32 machine epsilon noise
+/// floor across wide dynamic ranges (e.g. ConvNeXt with LayerScale where values reach thousands).
 const MAX_ABS: f32 = 1e-4;
 
 fn device() -> Device {
@@ -55,11 +56,14 @@ fn values<const D: usize>(tensor: Tensor<D>) -> Vec<f32> {
 fn assert_close(actual: &[f32], expected: &[f32], what: &str) -> f32 {
     assert_eq!(actual.len(), expected.len(), "{what}: element count");
     let mut max_abs = 0.0_f32;
+    let mut max_elem_err = 0.0_f32;
     let mut diff_sq = 0.0_f64;
     let mut expected_sq = 0.0_f64;
     for (a, b) in actual.iter().zip(expected) {
         let diff = (a - b).abs();
         max_abs = max_abs.max(diff);
+        let elem_err = diff / b.abs().max(1.0);
+        max_elem_err = max_elem_err.max(elem_err);
         diff_sq += (diff as f64).powi(2);
         expected_sq += (*b as f64).powi(2);
     }
@@ -71,9 +75,9 @@ fn assert_close(actual: &[f32], expected: &[f32], what: &str) -> f32 {
          (max abs diff {max_abs:.3e})"
     );
     assert!(
-        max_abs < MAX_ABS,
-        "{what}: max abs diff {max_abs:.3e} exceeds {MAX_ABS:.0e} \
-         (relative L2 error {l2_rel:.3e})"
+        max_elem_err < MAX_ABS,
+        "{what}: max elementwise error {max_elem_err:.3e} exceeds {MAX_ABS:.0e} \
+         (relative L2 error {l2_rel:.3e}, max abs diff {max_abs:.3e})"
     );
     max_abs
 }
