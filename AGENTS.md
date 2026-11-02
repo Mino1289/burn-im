@@ -14,6 +14,9 @@ Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before adding or changing a model.
 - Adding a model means: implement, register in `src/registry.rs`, add it to
   `MODELS` in `scripts/generate_fixtures.py`, add a golden test, validate, commit the
   fixture, update the README.
+- **Burn source code inspection**: Do not use web search or network requests to read Burn
+  internals (`burn`, `burn-nn`, `burn-tensor`, etc.). Read the local sources directly in
+  Cargo's registry cache (`~/.cargo/registry/src/index.crates.io-*/burn-*/`).
 
 ## Checks before committing
 

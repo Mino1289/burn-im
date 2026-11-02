@@ -1,8 +1,10 @@
-//! Channel-wise normalization layers: `LayerNorm2d` and ConvNeXt-V2 `GlobalResponseNorm`.
+//! Channel-wise normalization layers: `LayerNorm2d`, ConvNeXt-V2 `GlobalResponseNorm`,
+//! and root-mean-square normalizations (`RmsNorm`, `RMSNorm2d`).
 
 use burn::module::Param;
 use burn::nn::{Initializer, LayerNorm, LayerNormConfig};
 use burn::prelude::*;
+use burn::tensor::DType;
 
 /// Layer normalization over the channel dimension of a `[B, C, H, W]` tensor.
 ///
@@ -12,6 +14,8 @@ use burn::prelude::*;
 #[derive(Module, Debug)]
 pub struct LayerNorm2d {
     norm: LayerNorm,
+    #[module(skip)]
+    force_fp32: bool,
 }
 
 impl LayerNorm2d {
@@ -23,13 +27,148 @@ impl LayerNorm2d {
             norm: LayerNormConfig::new(num_channels)
                 .with_epsilon(eps)
                 .init(device),
+            force_fp32: false,
         }
+    }
+
+    /// Sets whether internal variance and mean accumulation are forced to `f32`.
+    pub fn with_force_fp32(mut self, force_fp32: bool) -> Self {
+        self.force_fp32 = force_fp32;
+        self
     }
 
     /// Applies channel-wise layer normalization to `[B, C, H, W]`.
     pub fn forward(&self, input: Tensor<4>) -> Tensor<4> {
-        let x = input.permute([0, 2, 3, 1]);
-        self.norm.forward(x).permute([0, 3, 1, 2])
+        let orig_dtype = input.dtype();
+        let x = if self.force_fp32 && orig_dtype != DType::F32 {
+            input.cast(DType::F32)
+        } else {
+            input
+        };
+        let x = x.permute([0, 2, 3, 1]);
+        let normalized = self.norm.forward(x).permute([0, 3, 1, 2]);
+        if self.force_fp32 && orig_dtype != DType::F32 {
+            normalized.cast(orig_dtype)
+        } else {
+            normalized
+        }
+    }
+}
+
+/// Root Mean Square normalization across the last dimension (`timm.layers.RmsNorm`).
+///
+/// Normalizes inputs by their root-mean-square value and scales by a learnable `weight` parameter:
+/// `y = x * weight / sqrt(mean(x^2) + eps)`
+#[derive(Module, Debug)]
+pub struct RmsNorm {
+    /// Learnable per-channel scale parameter (`weight` in PyTorch).
+    pub weight: Param<Tensor<1>>,
+    /// Numerical stability epsilon.
+    pub eps: f64,
+    #[module(skip)]
+    force_fp32: bool,
+}
+
+impl RmsNorm {
+    /// Creates an RMSNorm layer for `dim` features with affine scale initialized to ones.
+    pub fn new(dim: usize, eps: f64, device: &Device) -> Self {
+        Self {
+            weight: Initializer::Ones.init([dim], device),
+            eps,
+            force_fp32: false,
+        }
+    }
+
+    /// Enables or disables forcing `f32` accumulation for lower-precision inputs.
+    pub fn with_force_fp32(mut self, force_fp32: bool) -> Self {
+        self.force_fp32 = force_fp32;
+        self
+    }
+
+    /// Normalizes across the trailing dimension of a tensor of rank `D`.
+    pub fn forward<const D: usize>(&self, input: Tensor<D>) -> Tensor<D> {
+        let orig_dtype = input.dtype();
+        let x = if self.force_fp32 && orig_dtype != DType::F32 {
+            input.cast(DType::F32)
+        } else {
+            input
+        };
+        let last_dim = D - 1;
+        let v = x.clone().powf_scalar(2.0).mean_dim(last_dim);
+        let normalized = x / (v.add_scalar(self.eps)).sqrt();
+        let mut shape = [1; D];
+        shape[last_dim] = self.weight.dims()[0];
+        let weight = if self.force_fp32 && orig_dtype != DType::F32 {
+            self.weight.val().cast(DType::F32).reshape(shape)
+        } else {
+            self.weight.val().reshape(shape)
+        };
+        let out = normalized * weight;
+        if self.force_fp32 && orig_dtype != DType::F32 {
+            out.cast(orig_dtype)
+        } else {
+            out
+        }
+    }
+}
+
+/// 2D channel-wise Root Mean Square normalization (`timm.layers.RmsNorm2d`).
+///
+/// Operates directly on `[B, C, H, W]` spatial feature maps by reducing along the channel axis.
+#[derive(Module, Debug)]
+pub struct RMSNorm2d {
+    /// Learnable per-channel scale parameter (`weight` in PyTorch).
+    pub weight: Param<Tensor<1>>,
+    /// Numerical stability epsilon.
+    pub eps: f64,
+    #[module(skip)]
+    force_fp32: bool,
+}
+
+/// Alias matching `timm`'s naming convention.
+pub type RmsNorm2d = RMSNorm2d;
+
+impl RMSNorm2d {
+    /// Creates an `RMSNorm2d` layer for `num_channels` channels.
+    pub fn new(num_channels: usize, eps: f64, device: &Device) -> Self {
+        Self {
+            weight: Initializer::Ones.init([num_channels], device),
+            eps,
+            force_fp32: false,
+        }
+    }
+
+    /// Enables or disables forcing `f32` accumulation for lower-precision inputs.
+    pub fn with_force_fp32(mut self, force_fp32: bool) -> Self {
+        self.force_fp32 = force_fp32;
+        self
+    }
+
+    /// Applies 2D RMS normalization to `[B, C, H, W]`.
+    pub fn forward(&self, input: Tensor<4>) -> Tensor<4> {
+        let orig_dtype = input.dtype();
+        let x = if self.force_fp32 && orig_dtype != DType::F32 {
+            input.cast(DType::F32)
+        } else {
+            input
+        };
+        let v = x.clone().powf_scalar(2.0).mean_dim(1);
+        let normalized = x / (v.add_scalar(self.eps)).sqrt();
+        let channels = self.weight.dims()[0];
+        let weight = if self.force_fp32 && orig_dtype != DType::F32 {
+            self.weight
+                .val()
+                .cast(DType::F32)
+                .reshape([1, channels, 1, 1])
+        } else {
+            self.weight.val().reshape([1, channels, 1, 1])
+        };
+        let out = normalized * weight;
+        if self.force_fp32 && orig_dtype != DType::F32 {
+            out.cast(orig_dtype)
+        } else {
+            out
+        }
     }
 }
 

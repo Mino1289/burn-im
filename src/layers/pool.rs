@@ -1,7 +1,9 @@
-//! Global pooling strategies equivalent to `timm.layers.SelectAdaptivePool2d`.
+//! Global pooling strategies: `SelectAdaptivePool2d` and `AttentionPoolPrr` (PRR).
 
 use burn::nn::pool::{AdaptiveAvgPool2d, AdaptiveAvgPool2dConfig};
+use burn::nn::{LayerNorm, LayerNormConfig};
 use burn::prelude::*;
+use burn::tensor::activation::softmax;
 
 use crate::{Error, Result};
 
@@ -98,23 +100,109 @@ impl SelectAdaptivePool2d {
     }
 
     /// Applies pooling to `[B, C, H, W]`.
-    pub fn forward(&self, input: Tensor<4>) -> Tensor<4> {
-        let avg = |x: Tensor<4>| {
-            self.pool
-                .as_ref()
-                .expect("average pooling layer is present")
-                .forward(x)
-        };
+    pub fn forward(&self, x: Tensor<4>) -> Tensor<4> {
         match self.mode {
-            PoolMode::Avg | PoolMode::Fast => avg(input),
-            PoolMode::Max => input.max_dim(2).max_dim(3),
-            PoolMode::AvgMax => avg(input.clone()).add(avg_max(input)).mul_scalar(0.5),
-            PoolMode::CatAvgMax => Tensor::cat(vec![avg(input.clone()), avg_max(input)], 1),
-            PoolMode::Identity => input,
+            PoolMode::Avg | PoolMode::Fast => self.pool.as_ref().unwrap().forward(x),
+            PoolMode::Max => {
+                let dims = x.dims();
+                x.max_dim(2).max_dim(3).reshape([dims[0], dims[1], 1, 1])
+            }
+            PoolMode::AvgMax => {
+                let avg = x.clone().mean_dim(2).mean_dim(3);
+                let max = x.max_dim(2).max_dim(3);
+                (avg + max) * 0.5
+            }
+            PoolMode::CatAvgMax => {
+                let avg = x.clone().mean_dim(2).mean_dim(3);
+                let max = x.max_dim(2).max_dim(3);
+                Tensor::cat(vec![avg, max], 1)
+            }
+            PoolMode::Identity => x,
         }
     }
 }
 
-fn avg_max(input: Tensor<4>) -> Tensor<4> {
-    input.max_dim(2).max_dim(3)
+/// Patch Representation Refinement (PRR) pooling (`timm.layers.AttentionPoolPrr`).
+///
+/// Parameter-free multi-head self-attention that refines patch representations
+/// before pooling.
+#[derive(Module, Debug)]
+pub struct AttentionPoolPrr {
+    /// Optional pre-normalization.
+    pub pre_norm: Option<LayerNorm>,
+    /// Optional post-normalization.
+    pub post_norm: Option<LayerNorm>,
+    #[module(skip)]
+    /// Number of attention heads.
+    pub num_heads: usize,
+    #[module(skip)]
+    /// Dimension per head.
+    pub head_dim: usize,
+    #[module(skip)]
+    /// Attention scale factor.
+    pub scale: f64,
+    #[module(skip)]
+    /// Pool type ("token" or "avg").
+    pub pool_type: String,
+}
+
+impl AttentionPoolPrr {
+    /// Creates an `AttentionPoolPrr` layer.
+    pub fn new(
+        dim: usize,
+        num_heads: usize,
+        pool_type: &str,
+        pre_norm: bool,
+        post_norm: bool,
+        device: &Device,
+    ) -> Self {
+        assert_eq!(dim % num_heads, 0, "dim must be divisible by num_heads");
+        let head_dim = dim / num_heads;
+        let scale = (head_dim as f64).powf(-0.5);
+
+        let pre_norm = pre_norm.then(|| LayerNormConfig::new(dim).with_epsilon(1e-6).init(device));
+        let post_norm =
+            post_norm.then(|| LayerNormConfig::new(dim).with_epsilon(1e-6).init(device));
+
+        Self {
+            pre_norm,
+            post_norm,
+            num_heads,
+            head_dim,
+            scale,
+            pool_type: pool_type.to_string(),
+        }
+    }
+
+    /// Applies PRR attention pooling to token sequence `[B, N, C] -> [B, C]`.
+    pub fn forward(&self, x: Tensor<3>) -> Tensor<2> {
+        let [b, n, c] = x.dims();
+
+        let x = match &self.pre_norm {
+            Some(norm) => norm.forward(x),
+            None => x,
+        };
+
+        // Reshape parameter-free QKV: [B, num_heads, N, head_dim]
+        let qkv = x
+            .reshape([b, n, self.num_heads, self.head_dim])
+            .permute([0, 2, 1, 3]);
+        let q = qkv.clone() * self.scale;
+        let k_t = qkv.clone().permute([0, 1, 3, 2]);
+        let scores = q.matmul(k_t); // [B, num_heads, N, N]
+        let attn = softmax(scores, 3);
+        let out = attn.matmul(qkv); // [B, num_heads, N, head_dim]
+
+        let out = out.permute([0, 2, 1, 3]).reshape([b, n, c]);
+        let out = match &self.post_norm {
+            Some(norm) => norm.forward(out),
+            None => out,
+        };
+
+        if self.pool_type == "avg" {
+            out.mean_dim(1).reshape([b, c])
+        } else {
+            out.slice([0..b, 0..1, 0..c]).reshape([b, c])
+        }
+    }
 }
